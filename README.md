@@ -56,3 +56,7 @@ one packet per 4.2 s), 8×, or 30×.
 HUD: threshold ticks on each metric bar match the monitor's safety table
 (σ 0.053, ρ 0.95, r/dₛ 0.93, λ 1.15/1.30), plus a 3-minute Health sparkline and the
 latest payload hash. Press **H** to hide the panel for a pure field view.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

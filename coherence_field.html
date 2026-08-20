@@ -279,7 +279,8 @@ const sim = {
   ou: { health: .78, sigma: .03, rho: .84, rank: .86, paz: 1.0, net: 1.0, skew: 3.1, cosmic: 12, schu: -78 },
   event: null,               // {type:'coherence'|'pazuzu', t0, dur}
   nextAuto: performance.now() + rnd(35000, 90000),
-  baseline: .80
+  baseline: .80,
+  freeze: false              // demo deep-links hold their snapped state
 };
 function ouStep(v, mean, spd, vol, lo, hi) {
   return clamp(v + (mean - v) * spd + (Math.random() - .5) * vol, lo, hi);
@@ -348,9 +349,10 @@ function simTick() {
 }
 function fireEvent(type) {
   if (mode !== "sim") return;
+  sim.freeze = false;
   sim.event = { type, t0: performance.now(), dur: type === "pazuzu" ? rnd(14000, 22000) : rnd(18000, 30000) };
 }
-function calm() { sim.event = null; sim.nextAuto = performance.now() + rnd(60000, 140000); }
+function calm() { sim.freeze = false; sim.event = null; sim.nextAuto = performance.now() + rnd(60000, 140000); }
 
 /* ---------------- live mode ---------------- */
 let liveTimer = null, liveFails = 0;
@@ -583,7 +585,6 @@ function frame(now) {
 
   // particles
   ctx.globalCompositeOperation = "lighter";
-  const unified = F.danger > 0.5 ? 352 : 44;          // gold, or crimson under abort
   const spinRate = F.spin * 0.22 * (1 + F.danger * 2.5);
   const jitAmp = F.jit * (1 + F.danger * 3) * 1.9;
   const starMix = F.star;
@@ -618,9 +619,11 @@ function frame(now) {
       y = lerp(y, s.y + p.jy * 0.4, k);
     }
 
-    // color: scattered cool band → unified gold; crimson under danger
+    // color: scattered cool band → unified gold; crimson under danger.
+    // linear (non-circular) lerp so every particle warms along the same path
     const famHue = 206 + p.fam * 13 + p.hueJit * 16;   // 206–290 cool band
-    let hue = hueMix(famHue, unified, Math.max(F.C, F.danger * 0.9));
+    let hue = lerp(famHue, 46, F.C);
+    if (F.danger > 0.01) hue = hueMix(hue, 352, F.danger * 0.9);
     const act = F.act[p.fam];
     const alpha = clamp(0.22 + act * 0.30 + F.C * 0.24 + F.danger * 0.4, 0, 0.85)
                 * (0.75 + 0.25 * Math.sin(p.tw + p.hueJit * 3));
@@ -739,7 +742,7 @@ setInterval(() => {
 }, 250);
 
 /* ---------------- wiring ---------------- */
-setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
+setInterval(() => { if (mode === "sim" && !paused && !sim.freeze) simTick(); }, 1000);
 simTick();
 
 // when served by coherence_bridge.py, prefer its own /api/latest and go live;
@@ -752,6 +755,25 @@ if (location.protocol.startsWith("http")) {
       if (p && typeof p.health === "number") { $("endpoint").value = probe; setMode("live"); }
     })
     .catch(() => {});
+}
+
+// deep link: ?demo=coherence or ?demo=pazuzu fires that event shortly after
+// load, pre-advanced into its peak plateau so the state is visible immediately
+const demoEvt = new URLSearchParams(location.search).get("demo");
+if (demoEvt === "coherence" || demoEvt === "pazuzu") {
+  setTimeout(() => {
+    if (mode !== "sim") return;
+    sim.event = { type: demoEvt, dur: 600000, t0: performance.now() - 270000 };
+    simTick();
+    if (demoEvt === "coherence") {                // showcase state, not a warning
+      target.pazuzu_eigenvalue = Math.min(target.pazuzu_eigenvalue, 1.12);
+      target.pazuzu_flag = 0;
+    }
+    for (const k in target)                       // snap display values to the
+      if (typeof target[k] === "number") m[k] = target[k];  // event state at once
+    deriveField();
+    sim.freeze = true;                            // hold here until a button is pressed
+  }, 1200);
 }
 
 $("btnSim").onclick = () => setMode("sim");

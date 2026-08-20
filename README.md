@@ -9,6 +9,13 @@ runs in simulation mode; try the **Coherence event** and **Pazuzu surge** button
 (For live monitor data, run the bridge below and open `http://localhost:5005`
 instead — or paste your bridge's address into the demo's endpoint field.)
 
+Deep links jump straight to a state:
+[`?demo=coherence`](https://petersgrandadventure.github.io/coherence-visualizer/coherence_field.html?demo=coherence) ·
+[`?demo=pazuzu`](https://petersgrandadventure.github.io/coherence-visualizer/coherence_field.html?demo=pazuzu)
+
+![A high-coherence event: Health 0.96, the field unified in gold, particles
+migrating from the continuum cloud to the boundary ring](docs/coherence-event.png)
+
 ## Quick start
 
 Open `coherence_field.html` in any browser. It starts in **simulation mode** with a

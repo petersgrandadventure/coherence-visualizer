@@ -1,0 +1,12 @@
+# monitor data — never commit a ledger
+*.db
+*.db-journal
+*.csv
+
+# python
+__pycache__/
+*.pyc
+venv/
+
+# os
+.DS_Store

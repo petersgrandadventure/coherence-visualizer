@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coherence Field — HLAP Particle Visualizer</title>
+<style>
+  :root {
+    --bg: #05070e;
+    --panel: rgba(13, 17, 30, 0.82);
+    --panel-border: rgba(122, 148, 210, 0.16);
+    --ink: #dce4f5;
+    --ink-2: #8d99b8;
+    --ink-3: #5a6480;
+    --accent: #7aa7ff;
+    --good: #43d17c;
+    --warn: #f0b357;
+    --crit: #f0586a;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif;
+  }
+  #field { position: fixed; inset: 0; display: block; }
+
+  /* ---------- HUD panel ---------- */
+  #hud {
+    position: fixed; top: 14px; left: 14px; width: 292px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    backdrop-filter: blur(10px);
+    padding: 12px 14px 10px;
+    transition: transform .25s ease, opacity .25s ease;
+    z-index: 10;
+  }
+  #hud.hidden { transform: translateX(-320px); opacity: 0; pointer-events: none; }
+  #hud h1 {
+    font-size: 12px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-2); margin-bottom: 8px;
+  }
+  #hud h1 span { color: var(--ink-3); font-weight: 400; letter-spacing: .04em; text-transform: none; }
+
+  #status {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px; margin-bottom: 10px;
+    background: rgba(67, 209, 124, 0.08);
+    border: 1px solid rgba(67, 209, 124, 0.25);
+    font-family: var(--mono); font-size: 12px; letter-spacing: .05em;
+  }
+  #status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; }
+  #status.warn  { background: rgba(240,179,87,.08); border-color: rgba(240,179,87,.3); }
+  #status.warn .dot { background: var(--warn); }
+  #status.crit  { background: rgba(240,88,106,.1); border-color: rgba(240,88,106,.35); animation: pulse 1s infinite; }
+  #status.crit .dot { background: var(--crit); }
+  @keyframes pulse { 50% { border-color: rgba(240,88,106,.8); } }
+  #status .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .mrow { display: grid; grid-template-columns: 62px 1fr 52px; gap: 8px; align-items: center; margin: 4px 0; }
+  .mrow .lbl { color: var(--ink-2); font-size: 11.5px; }
+  .mrow .val { font-family: var(--mono); font-size: 11.5px; text-align: right; color: var(--ink); }
+  .bar { position: relative; height: 5px; border-radius: 3px; background: rgba(122,148,210,0.12); overflow: visible; }
+  .bar .fill { position: absolute; inset: 0 auto 0 0; width: 0%; border-radius: 3px; background: var(--accent); transition: width .4s ease, background .4s ease; }
+  .bar .tick { position: absolute; top: -2px; bottom: -2px; width: 1.5px; background: rgba(240,179,87,.55); }
+  .bar .tick.crit { background: rgba(240,88,106,.65); }
+
+  #gates { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin: 10px 0 4px; }
+  .gate { text-align: center; }
+  .gate .gbar { height: 22px; border-radius: 4px; background: rgba(122,148,210,0.1); position: relative; overflow: hidden; }
+  .gate .gfill { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; background: var(--accent); opacity: .8; transition: height .4s ease; }
+  .gate .glbl { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); margin-top: 3px; }
+
+  #spark { width: 100%; height: 44px; display: block; margin-top: 8px; }
+  .caption { font-size: 10px; color: var(--ink-3); display: flex; justify-content: space-between; margin-top: 2px; }
+  #hash { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ---------- bottom dock (timeline + control bar) ---------- */
+  #dock {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    max-width: calc(100vw - 24px); z-index: 10;
+  }
+  #controls {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 12px; padding: 8px 10px; backdrop-filter: blur(10px);
+    max-width: 100%;
+  }
+  button, .chip {
+    font: 11.5px/1 -apple-system, "Segoe UI", sans-serif;
+    color: var(--ink); background: rgba(122,148,210,0.12);
+    border: 1px solid rgba(122,148,210,0.2); border-radius: 7px;
+    padding: 7px 11px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover { background: rgba(122,148,210,0.22); }
+  button:disabled { opacity: .35; cursor: default; }
+  button.active { background: rgba(122,167,255,0.25); border-color: rgba(122,167,255,0.5); }
+  #endpoint {
+    font: 11px var(--mono); color: var(--ink); background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(122,148,210,0.2); border-radius: 7px;
+    padding: 7px 9px; width: 218px;
+  }
+  #liveState { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+  #liveState.ok { color: var(--good); }
+  #liveState.bad { color: var(--crit); }
+  .sep { width: 1px; height: 20px; background: rgba(122,148,210,0.2); }
+
+  /* ---------- history timeline ---------- */
+  #timeline {
+    width: min(780px, calc(100vw - 24px));
+    display: none; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 12px; padding: 8px 10px; backdrop-filter: blur(10px);
+  }
+  #timeline.open { display: flex; }
+  #btnPlay { width: 34px; text-align: center; }
+  #btnSpeed { width: 42px; text-align: center; font-family: var(--mono); }
+  #tlWrap { flex: 1; position: relative; height: 36px; }
+  #tlCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #tlScrub {
+    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+    -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer;
+  }
+  #tlScrub::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 3px; height: 36px; border-radius: 2px;
+    background: #dce4f5; box-shadow: 0 0 6px rgba(220,228,245,.8);
+  }
+  #tlScrub::-moz-range-thumb {
+    width: 3px; height: 36px; border: 0; border-radius: 2px; background: #dce4f5;
+  }
+  #tlTime { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); min-width: 118px; text-align: right; }
+
+  /* ---------- help overlay ---------- */
+  #help {
+    position: fixed; inset: 0; background: rgba(4,6,12,0.86);
+    backdrop-filter: blur(6px); z-index: 20; display: none;
+    overflow-y: auto; padding: 40px 20px;
+  }
+  #help.open { display: block; }
+  #help .card {
+    max-width: 620px; margin: 0 auto; background: var(--panel);
+    border: 1px solid var(--panel-border); border-radius: 14px; padding: 26px 30px;
+  }
+  #help h2 { font-size: 16px; margin-bottom: 4px; }
+  #help h3 { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); margin: 18px 0 8px; }
+  #help p, #help li { color: var(--ink-2); font-size: 12.5px; }
+  #help ul { list-style: none; }
+  #help li { display: flex; gap: 10px; margin: 7px 0; align-items: baseline; }
+  #help li b { color: var(--ink); font-weight: 600; flex: none; width: 170px; }
+  #help .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; position: relative; top: 1px; }
+  #help .close { float: right; }
+  #help code { font-family: var(--mono); font-size: 11px; background: rgba(0,0,0,.35); padding: 1px 5px; border-radius: 4px; }
+
+  #hudToggle { position: fixed; top: 14px; left: 14px; z-index: 9; }
+  @media (max-width: 700px) {
+    #hud { width: calc(100vw - 28px); }
+    #endpoint { width: 130px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="field"></canvas>
+
+<button id="hudToggle" title="Toggle panel (H)">☰</button>
+
+<div id="hud">
+  <h1>Coherence Monitor <span>· HLAP field view</span></h1>
+  <div id="status"><div class="dot"></div><div class="txt">INITIALIZING</div></div>
+  <div id="metrics"></div>
+  <div id="gates"></div>
+  <canvas id="spark" width="264" height="44"></canvas>
+  <div class="caption"><span>Health · last 3 min</span><span id="clock">—</span></div>
+  <div id="hash">payload —</div>
+</div>
+
+<div id="dock">
+<div id="timeline">
+  <button id="btnPlay" title="Play / pause replay">⏵</button>
+  <button id="btnSpeed" title="Replay speed">8×</button>
+  <div id="tlWrap">
+    <canvas id="tlCanvas"></canvas>
+    <input id="tlScrub" type="range" min="0" max="0" value="0" step="1">
+  </div>
+  <div id="tlTime">—</div>
+</div>
+
+<div id="controls">
+  <button id="btnSim" class="active">Simulation</button>
+  <input id="endpoint" value="http://localhost:5005/api/latest" spellcheck="false">
+  <button id="btnLive">Connect live</button>
+  <button id="btnHist">History</button>
+  <span id="liveState"></span>
+  <div class="sep"></div>
+  <button id="btnCoh">Coherence event</button>
+  <button id="btnPaz">Pazuzu surge</button>
+  <button id="btnCalm">Calm</button>
+  <div class="sep"></div>
+  <button id="btnPause">Pause</button>
+  <button id="btnHelp">How to read</button>
+</div>
+</div>
+
+<div id="help">
+  <div class="card">
+    <button class="close" onclick="document.getElementById('help').classList.remove('open')">Close</button>
+    <h2>Reading the field</h2>
+    <p>Every quantity the coherence monitor logs is expressed as particle behavior, so a glance tells you the state of the field — the same way the GCP Dot compresses network variance into a single color.</p>
+
+    <h3>Color = statistical coherence</h3>
+    <ul>
+      <li><span class="sw" style="background:#6b7fd4"></span><b>Scattered cool hues</b> Baseline randomness. Health 0.65–0.85, entropy near 7.999 bits/byte.</li>
+      <li><span class="sw" style="background:#ffd76b"></span><b>Converging gold</b> Coherence event. As Health climbs past 0.9 the hues collapse into a single band — spectral coherence rendered as color coherence.</li>
+      <li><span class="sw" style="background:#f0586a"></span><b>Crimson turbulence</b> Pazuzu critical (λmax/λMP &gt; 1.30). The field destabilizes; the monitor would be calling for abort.</li>
+    </ul>
+
+    <h3>Shape = where the information is</h3>
+    <ul>
+      <li><b>Amorphous cloud (center)</b> Local continuum coherence, CI_C. Its jitter amplitude is σ; its rotation speed is ρ.</li>
+      <li><b>Outer ring migration</b> Conservation in action (Axiom H₁₃): when CI_B spikes, particles stream outward from the continuum cloud to the boundary ring in proportion to the transfer.</li>
+      <li><b>Seven-pointed star lock</b> Gate 7: when the largest eigenvalue of the cross-gate correlation matrix crosses the Marchenko–Pastur edge (λmax/λMP &gt; 1.15), particles trace the heptagram — the 7-fold residue of a genuine ledger packet.</li>
+      <li><b>Disintegration</b> PSI below 0.3 — proximity to collapse. The structure loses its ability to hold form.</li>
+    </ul>
+
+    <h3>The seven gate tiles</h3>
+    <p>G1 CPU entropy · G2 webcam photonics · G3 Schumann-band audio · G4 network timing · G5 clock drift · G6 non-local MI · G7 eigenvalue integrator. Tile height is each gate's normalized ledger-index activity; the brightness of that gate's particle family follows it.</p>
+
+    <h3>Going live</h3>
+    <p>Run the monitor, then serve its database with the bundled bridge: <code>python3 coherence_bridge.py</code> (from the folder containing <code>coherence_ledger.db</code>). Opening <code>http://localhost:5005</code> loads this page already connected; or open the file directly and press <b>Connect live</b>. (The bridge defaults to port 5005 because macOS AirPlay occupies 5000.) The visualizer polls <code>/api/latest</code> every 2 s — one new packet per 4.2 s monitor cycle.</p>
+
+    <h3>History playback</h3>
+    <p><b>History</b> loads the last 1200 logged packets (~84 minutes) from the bridge's <code>/api/recent</code> and replays them through the field. The timeline strip shows Health across the whole span — gold dots mark high-coherence events, red ticks mark Pazuzu flags — so you can scrub straight to the interesting moments. ⏵ plays at 1×, 8×, or 30× (1× = real time, one packet per 4.2 s). Without a bridge, it replays what this page has seen during the current session.</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Coherence Field — particle visualizer for coherence_monitor
+   Data schema mirrors ledger_packets (coherence_monitor.py).
+   ============================================================ */
+
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
+const TAU = Math.PI * 2;
+
+/* ---------------- packet state ---------------- */
+// target = latest packet; m = eased display values
+const blank = () => ({
+  health: .78, psi: .55, ci_boundary: .02, ci_continuum: .78,
+  sigma: .03, rho: .84, rank_ratio: .86, pazuzu_eigenvalue: 1.0,
+  entropy_rate: 7.998, cosmic_hit_rate: 12, schumann_injection: -78,
+  network_phase_lock: 1.0, time_skew_spectral: 3.1, nonlocal_mutual_info: .004,
+  pazuzu_flag: 0, payload_hash: "", timestamp: Date.now() / 1000
+});
+let target = blank(), m = blank();
+let mode = "sim";            // "sim" | "live" | "hist"
+let paused = false;
+const healthHist = [];
+
+// rolling record of every packet seen this session (sim or live) — the
+// fallback source for history playback when no bridge is reachable
+const session = [];
+function recordPacket(p) {
+  session.push(Object.assign({}, p));
+  if (session.length > 2400) session.shift();
+}
+
+/* ---------------- simulation engine ---------------- */
+// Ornstein-Uhlenbeck wander around a nominal operating point, plus
+// scripted event envelopes matching the README's described signatures.
+const sim = {
+  ou: { health: .78, sigma: .03, rho: .84, rank: .86, paz: 1.0, net: 1.0, skew: 3.1, cosmic: 12, schu: -78 },
+  event: null,               // {type:'coherence'|'pazuzu', t0, dur}
+  nextAuto: performance.now() + rnd(35000, 90000),
+  baseline: .80
+};
+function ouStep(v, mean, spd, vol, lo, hi) {
+  return clamp(v + (mean - v) * spd + (Math.random() - .5) * vol, lo, hi);
+}
+function simTick() {
+  const now = performance.now();
+  const o = sim.ou;
+  o.health = ouStep(o.health, .77, .04, .022, .62, .88);
+  o.sigma  = ouStep(o.sigma,  .030, .05, .004, .015, .050);
+  o.rho    = ouStep(o.rho,    .84,  .04, .018, .74, .93);
+  o.rank   = ouStep(o.rank,   .86,  .04, .012, .80, .92);
+  o.paz    = ouStep(o.paz,    1.00, .05, .022, .92, 1.10);
+  o.net    = ouStep(o.net,    1.00, .05, .03,  .85, 1.15);
+  o.skew   = ouStep(o.skew,   3.1,  .04, .12,  2.4, 4.4);
+  o.cosmic = ouStep(o.cosmic, 12,   .05, 3,    0,   55);
+  o.schu   = ouStep(o.schu,  -78,   .04, 1.4, -92, -60);
+
+  // auto-fire an occasional coherence event, like a quiet room surprising you
+  if (!sim.event && now > sim.nextAuto) {
+    sim.event = { type: "coherence", t0: now, dur: rnd(16000, 30000) };
+    sim.nextAuto = now + rnd(60000, 140000);
+  }
+
+  let health = o.health, sigma = o.sigma, rho = o.rho, rank = o.rank, paz = o.paz;
+  let ciB = clamp(sim.baseline - health, 0, .3) * .4 + rnd(0, .012);
+  let schu = o.schu, mi = rnd(0, .008), entropy = 7.999 + rnd(-.0015, .0015);
+
+  if (sim.event) {
+    const e = sim.event, x = (now - e.t0) / e.dur;
+    if (x >= 1) sim.event = null;
+    else {
+      const env = smooth(0, .25, x) * (1 - smooth(.72, 1, x));   // ramp, hold, ramp down
+      if (e.type === "coherence") {
+        // README: Health 0.90-0.98, CI_B 0.10-0.25, λ 1.10-1.20, Schumann +3-6 dB
+        health = lerp(health, rnd(.91, .97), env);
+        ciB    = lerp(ciB, rnd(.12, .24), env);
+        paz    = lerp(paz, rnd(1.10, 1.19), env);
+        schu  += 5 * env;
+        mi     = lerp(mi, rnd(.05, .08), env);
+        entropy -= .004 * env;
+      } else {
+        // README Pazuzu: Health < 0.5, PSI < 0.3, σ > 0.053, ρ > 0.95, λ > 1.30
+        health = lerp(health, rnd(.30, .45), env);
+        sigma  = lerp(sigma, rnd(.058, .075), env);
+        rho    = lerp(rho, rnd(.96, 1.02), env);
+        rank   = lerp(rank, rnd(.94, .97), env);
+        paz    = lerp(paz, rnd(1.32, 1.45), env);
+        ciB    = lerp(ciB, rnd(.2, .3), env);
+      }
+    }
+  }
+
+  const sigMargin = clamp((0.053 - sigma) / 0.053, 0, 1);
+  const psi = sigMargin * health;
+
+  target = {
+    health, psi, ci_boundary: ciB, ci_continuum: health,
+    sigma, rho, rank_ratio: rank, pazuzu_eigenvalue: paz,
+    entropy_rate: entropy, cosmic_hit_rate: o.cosmic, schumann_injection: schu,
+    network_phase_lock: o.net, time_skew_spectral: o.skew, nonlocal_mutual_info: mi,
+    pazuzu_flag: paz > 1.15 ? 1 : 0,
+    payload_hash: Math.floor(Math.random() * 2 ** 48).toString(16).padStart(12, "0"),
+    timestamp: Date.now() / 1000
+  };
+  recordPacket(target);
+}
+function fireEvent(type) {
+  if (mode !== "sim") return;
+  sim.event = { type, t0: performance.now(), dur: type === "pazuzu" ? rnd(14000, 22000) : rnd(18000, 30000) };
+}
+function calm() { sim.event = null; sim.nextAuto = performance.now() + rnd(60000, 140000); }
+
+/* ---------------- live mode ---------------- */
+let liveTimer = null, liveFails = 0;
+async function pollLive() {
+  try {
+    const r = await fetch($("endpoint").value, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    const p = await r.json();
+    if (p && typeof p.health === "number") {
+      target = Object.assign(blank(), p);
+      recordPacket(target);
+      liveFails = 0;
+      const age = Date.now() / 1000 - (p.timestamp || 0);
+      setLiveState(age > 30 ? `stale ${Math.round(age)}s` : "receiving", age > 30 ? "bad" : "ok");
+    } else throw new Error("empty");
+  } catch (err) {
+    if (++liveFails >= 3) setLiveState("no connection", "bad");
+  }
+}
+function setLiveState(txt, cls) { const el = $("liveState"); el.textContent = txt; el.className = cls || ""; }
+function setMode(next) {
+  mode = next;
+  $("btnSim").classList.toggle("active", mode === "sim");
+  $("btnLive").classList.toggle("active", mode === "live");
+  $("btnHist").classList.toggle("active", mode === "hist");
+  for (const id of ["btnCoh", "btnPaz", "btnCalm"]) $(id).disabled = mode !== "sim";
+  clearInterval(liveTimer); liveTimer = null;
+  setPlaying(false);
+  $("timeline").classList.toggle("open", mode === "hist");
+  if (mode === "live") { setLiveState("connecting…"); pollLive(); liveTimer = setInterval(pollLive, 2000); }
+  else if (mode === "sim") setLiveState("");
+}
+
+/* ---------------- history playback ---------------- */
+const hist = { packets: [], idx: 0, playing: false, speed: 8, timer: null };
+const SPEEDS = [1, 8, 30];   // 1× = real time, one packet per 4.2 s
+
+async function enterHistory() {
+  setMode("hist");
+  let packets = null, src = "";
+  try {
+    const url = $("endpoint").value.replace(/latest.*$/, "recent?n=1200");
+    const r = await fetch(url, { cache: "no-store" });
+    if (r.ok) {
+      const j = await r.json();
+      if (Array.isArray(j) && j.length) { packets = j.slice().reverse(); src = "ledger"; }
+    }
+  } catch (err) {}
+  if (!packets && session.length > 5) { packets = session.slice(); src = "session"; }
+  if (!packets) {
+    setLiveState("no history available", "bad");
+    setMode("sim");
+    return;
+  }
+  hist.packets = packets;
+  $("tlScrub").max = packets.length - 1;
+  drawTimeline();
+  seek(0);
+  setLiveState(src === "ledger"
+    ? `replaying ${packets.length} ledger packets`
+    : `replaying ${packets.length} packets · this session`, "ok");
+  setPlaying(true);
+}
+
+function seek(i) {
+  if (!hist.packets.length) return;
+  hist.idx = clamp(i, 0, hist.packets.length - 1);
+  target = Object.assign(blank(), hist.packets[hist.idx]);
+  $("tlScrub").value = hist.idx;
+  const ts = target.timestamp || 0;
+  $("tlTime").textContent = new Date(ts * 1000).toLocaleString([],
+    { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function setPlaying(on) {
+  hist.playing = on && mode === "hist" && hist.packets.length > 1;
+  $("btnPlay").textContent = hist.playing ? "⏸" : "⏵";
+  clearInterval(hist.timer); hist.timer = null;
+  if (hist.playing) hist.timer = setInterval(() => {
+    if (paused) return;
+    if (hist.idx >= hist.packets.length - 1) setPlaying(false);
+    else seek(hist.idx + 1);
+  }, 4200 / hist.speed);
+}
+
+function drawTimeline() {
+  const c = $("tlCanvas"), w = c.clientWidth, h = c.clientHeight;
+  if (!w) return;
+  if (c.width !== Math.round(w * DPR)) { c.width = Math.round(w * DPR); c.height = Math.round(h * DPR); }
+  const g = c.getContext("2d");
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const P = hist.packets, n = P.length;
+  if (!n) return;
+  const X = i => n > 1 ? i / (n - 1) * w : 0;
+
+  g.strokeStyle = "rgba(240,179,87,0.3)";
+  g.setLineDash([3, 3]); g.beginPath();
+  g.moveTo(0, h - 0.9 * h); g.lineTo(w, h - 0.9 * h); g.stroke();
+  g.setLineDash([]);
+
+  g.strokeStyle = "rgba(240,88,106,0.65)"; g.lineWidth = 1;
+  for (let i = 0; i < n; i++) if (P[i].pazuzu_flag) {
+    g.beginPath(); g.moveTo(X(i), 2); g.lineTo(X(i), h - 2); g.stroke();
+  }
+
+  g.strokeStyle = "#7aa7ff"; g.lineWidth = 1.3; g.beginPath();
+  for (let i = 0; i < n; i++) {
+    const y = h - clamp(P[i].health || 0, 0, 1) * h;
+    i ? g.lineTo(X(i), y) : g.moveTo(X(i), y);
+  }
+  g.stroke();
+
+  g.fillStyle = "#ffd76b";
+  for (let i = 0; i < n; i++) if ((P[i].health || 0) > 0.9) {
+    g.fillRect(X(i) - 1, h - P[i].health * h - 1, 2.5, 2.5);
+  }
+}
+window.addEventListener("resize", drawTimeline);
+
+/* ---------------- derived field parameters ---------------- */
+const F = { C: 0, jit: 1, spin: 1, bFrac: 0, star: 0, danger: 0, collapse: 0, act: [0,0,0,0,0,0,0] };
+function deriveField() {
+  F.C        = smooth(0.72, 0.93, m.health);                       // order parameter
+  F.jit      = clamp(m.sigma / 0.053, 0.1, 2.2);                   // σ → Brownian amplitude
+  F.spin     = 0.3 + 1.5 * clamp(m.rho, 0, 1.15);                  // ρ → angular speed
+  F.bFrac    = clamp(m.ci_boundary / 0.28, 0, 1) * 0.55;           // CI_B → boundary migration
+  F.star     = smooth(1.05, 1.17, m.pazuzu_eigenvalue);            // λ ratio → heptagram lock
+  F.danger   = smooth(1.20, 1.33, m.pazuzu_eigenvalue);            // λ ratio → crimson turbulence
+  F.collapse = smooth(0.30, 0.10, m.psi);                          // PSI → disintegration
+  F.act = [
+    clamp(Math.abs(m.entropy_rate - 7.999) / 0.006, 0, 1),
+    clamp(m.cosmic_hit_rate / 60, 0, 1),
+    clamp((m.schumann_injection + 90) / 30, 0, 1),
+    clamp(Math.abs(m.network_phase_lock - 1) / 0.2, 0, 1),
+    clamp(Math.abs(m.time_skew_spectral - 3) / 2.5, 0, 1),
+    clamp(m.nonlocal_mutual_info / 0.06, 0, 1),
+    clamp((m.pazuzu_eigenvalue - 0.95) / 0.4, 0, 1)
+  ];
+}
+
+/* ---------------- particle field ---------------- */
+const canvas = $("field"), ctx = canvas.getContext("2d");
+let W = 0, H = 0, CX = 0, CY = 0, R = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2; R = Math.min(W, H) * 0.42;
+  ctx.fillStyle = "#05070e"; ctx.fillRect(0, 0, W, H);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// heptagram {7/3}: vertex order 0,3,6,2,5,1,4 — one closed stroke
+const starOrder = [0, 3, 6, 2, 5, 1, 4];
+function starPoint(t, radius) {
+  const seg = Math.floor(t * 7) % 7, f = (t * 7) % 1;
+  const a1 = -Math.PI / 2 + starOrder[seg] * TAU / 7;
+  const a2 = -Math.PI / 2 + starOrder[(seg + 1) % 7] * TAU / 7;
+  return {
+    x: CX + lerp(Math.cos(a1), Math.cos(a2), f) * radius,
+    y: CY + lerp(Math.sin(a1), Math.sin(a2), f) * radius
+  };
+}
+
+const N = Math.round(clamp(window.innerWidth * window.innerHeight / 1100, 700, 1600));
+const parts = [];
+for (let i = 0; i < N; i++) {
+  parts.push({
+    fam: i % 7,
+    a: rnd(TAU),                       // polar angle
+    r: 0,                              // current radius (set on first frame)
+    hr: Math.pow(Math.random(), 0.7),  // home-radius factor inside the cloud
+    drift: rnd(-1, 1),                 // personal angular tendency at low coherence
+    role: 0,                           // 0 continuum, 1 boundary
+    jx: 0, jy: 0,                      // accumulated jitter offset
+    starT: Math.random(),              // parameter along the heptagram path
+    starW: Math.random() < 0.75 ? rnd(0.55, 1) : 0,  // some particles never join the star
+    hueJit: rnd(-1, 1),
+    size: rnd(0.9, 2.1),
+    tw: rnd(TAU)                       // twinkle phase
+  });
+  parts[i].r = R * (0.16 + 0.36 * parts[i].hr);
+}
+
+function hueMix(a, b, t) {            // shortest-path hue interpolation
+  let d = ((b - a + 540) % 360) - 180;
+  return (a + d * t + 360) % 360;
+}
+
+let lastFrame = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (paused) { lastFrame = now; return; }
+  const dt = clamp((now - lastFrame) / 1000, 0.001, 0.05);
+  lastFrame = now;
+
+  // ease displayed metrics toward the latest packet
+  for (const k in target) {
+    if (typeof target[k] === "number" && k !== "timestamp")
+      m[k] = lerp(m[k], target[k], 1 - Math.pow(0.25, dt));
+  }
+  deriveField();
+
+  // trail fade
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(5,7,14,0.26)";
+  ctx.fillRect(0, 0, W, H);
+
+  // faint boundary ring (the ledger)
+  ctx.strokeStyle = `rgba(122,148,210,${0.05 + F.bFrac * 0.18})`;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(CX, CY, R * 0.86, 0, TAU); ctx.stroke();
+
+  // heptagram guide while the 50th gate is opening
+  if (F.star > 0.04) {
+    ctx.strokeStyle = `hsla(${F.danger > 0.3 ? 352 : 44}, 90%, 65%, ${F.star * 0.20})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    for (let k = 0; k <= 7; k++) {
+      const a = -Math.PI / 2 + starOrder[k % 7] * TAU / 7;
+      const x = CX + Math.cos(a) * R * 0.62, y = CY + Math.sin(a) * R * 0.62;
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // particles
+  ctx.globalCompositeOperation = "lighter";
+  const unified = F.danger > 0.5 ? 352 : 44;          // gold, or crimson under abort
+  const spinRate = F.spin * 0.22 * (1 + F.danger * 2.5);
+  const jitAmp = F.jit * (1 + F.danger * 3) * 1.9;
+  const starMix = F.star;
+
+  for (const p of parts) {
+    // occasional role re-draw pulls the population toward the CI_B/CI_C split
+    if (Math.random() < 0.006) p.role = Math.random() < F.bFrac ? 1 : 0;
+
+    p.tw += dt * 2;
+    const targetR = p.role
+      ? R * 0.86 + Math.sin(p.tw) * 4
+      : R * (0.16 + 0.36 * p.hr) * (1 + F.collapse * (1.6 + p.hueJit));
+
+    // angular motion: personal wander at low coherence, shared orbit at high
+    const angVel = spinRate * lerp(p.drift * 0.5, 1, F.C * 0.9) * (p.role ? 0.5 : 1);
+    p.a += angVel * dt * (0.25 + 0.75 * F.C + F.danger);
+    p.r += (targetR - p.r) * (1 - Math.pow(0.02, dt));
+
+    // Brownian jitter, damped accumulator
+    p.jx = p.jx * 0.90 + (Math.random() - 0.5) * jitAmp;
+    p.jy = p.jy * 0.90 + (Math.random() - 0.5) * jitAmp;
+
+    let x = CX + Math.cos(p.a) * p.r + p.jx * (1 - F.C * 0.6);
+    let y = CY + Math.sin(p.a) * p.r + p.jy * (1 - F.C * 0.6);
+
+    // heptagram lock
+    if (starMix > 0.01 && p.starW > 0) {
+      p.starT = (p.starT + dt * 0.05 * (0.5 + F.C + F.danger)) % 1;
+      const s = starPoint(p.starT, R * 0.62);
+      const k = starMix * p.starW * (p.role ? 0.25 : 1);
+      x = lerp(x, s.x + p.jx * 0.4, k);
+      y = lerp(y, s.y + p.jy * 0.4, k);
+    }
+
+    // color: scattered cool band → unified gold; crimson under danger
+    const famHue = 206 + p.fam * 13 + p.hueJit * 16;   // 206–290 cool band
+    let hue = hueMix(famHue, unified, Math.max(F.C, F.danger * 0.9));
+    const act = F.act[p.fam];
+    const alpha = clamp(0.22 + act * 0.30 + F.C * 0.24 + F.danger * 0.4, 0, 0.85)
+                * (0.75 + 0.25 * Math.sin(p.tw + p.hueJit * 3));
+    const sat = Math.round(lerp(55, 92, Math.max(F.C, F.danger)));
+    const lig = Math.round(lerp(58, 68, F.C) + F.danger * 4);
+    const size = p.size * (1 + act * 0.7 + F.C * 0.35);
+
+    ctx.fillStyle = `hsla(${Math.round(hue)},${sat}%,${lig}%,${alpha})`;
+    ctx.beginPath(); ctx.arc(x, y, size, 0, TAU); ctx.fill();
+
+    // soft halo on the most active particles
+    if (act + F.C + F.danger > 1.15) {
+      ctx.fillStyle = `hsla(${Math.round(hue)},${sat}%,${lig}%,${alpha * 0.09})`;
+      ctx.beginPath(); ctx.arc(x, y, size * 3.2, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+requestAnimationFrame(frame);
+
+/* ---------------- HUD ---------------- */
+const METRICS = [
+  { k: "health",           lbl: "Health",  min: 0,   max: 1,    warnLo: .7,  hi: .9,  fmt: v => v.toFixed(3) },
+  { k: "psi",              lbl: "PSI",     min: 0,   max: 1,    warnLo: .3,           fmt: v => v.toFixed(3) },
+  { k: "ci_boundary",      lbl: "CI_B",    min: 0,   max: .3,                          fmt: v => v.toFixed(3) },
+  { k: "ci_continuum",     lbl: "CI_C",    min: 0,   max: 1,                           fmt: v => v.toFixed(3) },
+  { k: "sigma",            lbl: "σ",       min: 0,   max: .08,  warn: .053,            fmt: v => v.toFixed(4) },
+  { k: "rho",              lbl: "ρ",       min: 0,   max: 1.1,  warn: .95,             fmt: v => v.toFixed(3) },
+  { k: "rank_ratio",       lbl: "r/dₛ",    min: 0,   max: 1,    warn: .93,             fmt: v => v.toFixed(3) },
+  { k: "pazuzu_eigenvalue",lbl: "λ/λMP",   min: .8,  max: 1.5,  warn: 1.15, crit: 1.3, fmt: v => v.toFixed(3) }
+];
+const GATE_NAMES = ["CPU entropy", "Photonic", "Acoustic", "Network", "Temporal", "Non-local", "Integrator"];
+const mWrap = $("metrics");
+for (const d of METRICS) {
+  const row = document.createElement("div");
+  row.className = "mrow";
+  row.innerHTML = `<div class="lbl">${d.lbl}</div>
+    <div class="bar" id="bar_${d.k}"><div class="fill"></div></div>
+    <div class="val" id="val_${d.k}">—</div>`;
+  mWrap.appendChild(row);
+  const bar = row.querySelector(".bar");
+  for (const [pos, cls] of [[d.warn ?? d.warnLo ?? d.hi, ""], [d.crit, "crit"]]) {
+    if (pos !== undefined) {
+      const t = document.createElement("div");
+      t.className = "tick " + cls;
+      t.style.left = ((pos - d.min) / (d.max - d.min) * 100) + "%";
+      bar.appendChild(t);
+    }
+  }
+}
+const gWrap = $("gates");
+for (let i = 0; i < 7; i++) {
+  const g = document.createElement("div");
+  g.className = "gate";
+  g.title = `Gate ${i + 1}: ${GATE_NAMES[i]}`;
+  g.innerHTML = `<div class="gbar"><div class="gfill" id="g${i}"></div></div><div class="glbl">G${i + 1}</div>`;
+  gWrap.appendChild(g);
+}
+const spark = $("spark"), sctx = spark.getContext("2d");
+
+function statusOf() {
+  const alerts = [];
+  if (m.pazuzu_eigenvalue > 1.30) alerts.push(["crit", `PAZUZU ABORT λ=${m.pazuzu_eigenvalue.toFixed(2)}`]);
+  else if (m.pazuzu_eigenvalue > 1.15) alerts.push(["warn", `PAZUZU WARNING λ=${m.pazuzu_eigenvalue.toFixed(2)}`]);
+  if (m.sigma > 0.053) alerts.push(["crit", `σ EXCEEDED ${m.sigma.toFixed(3)}`]);
+  if (m.rho > 0.95) alerts.push(["crit", `ρ CRITICAL ${m.rho.toFixed(2)}`]);
+  if (m.rank_ratio > 0.93) alerts.push(["warn", `RANK ${m.rank_ratio.toFixed(2)}`]);
+  const crit = alerts.find(a => a[0] === "crit");
+  if (crit) return ["crit", crit[1]];
+  if (alerts.length) return ["warn", alerts[0][1]];
+  if (m.psi < 0.3) return ["warn", "PSI < 0.3 — collapse proximity"];
+  if (m.health > 0.9) return ["", "HIGH COHERENCE EVENT"];
+  return ["", "NOMINAL"];
+}
+
+setInterval(() => {
+  if (paused) return;
+  for (const d of METRICS) {
+    const v = m[d.k];
+    $("val_" + d.k).textContent = d.fmt(v);
+    const fill = $("bar_" + d.k).querySelector(".fill");
+    fill.style.width = (clamp((v - d.min) / (d.max - d.min), 0, 1) * 100) + "%";
+    const over = (d.crit !== undefined && v > d.crit) ? "var(--crit)"
+               : (d.warn !== undefined && v > d.warn) ? "var(--warn)"
+               : (d.warnLo !== undefined && v < d.warnLo) ? "var(--warn)"
+               : d.k === "health" && v > 0.9 ? "#ffd76b"
+               : "var(--accent)";
+    fill.style.background = over;
+  }
+  for (let i = 0; i < 7; i++) {
+    const g = $("g" + i);
+    g.style.height = (F.act[i] * 100).toFixed(0) + "%";
+    g.style.background = F.act[i] > 0.75 ? "var(--warn)" : "var(--accent)";
+  }
+  const [cls, txt] = statusOf();
+  $("status").className = cls;
+  $("status").querySelector(".txt").textContent = txt;
+  $("clock").textContent = new Date((target.timestamp || 0) * 1000).toLocaleTimeString();
+  $("hash").textContent = "payload " + (target.payload_hash || "—");
+
+  // sparkline
+  healthHist.push(m.health);
+  if (healthHist.length > 180) healthHist.shift();
+  const w = spark.width, h = spark.height;
+  sctx.clearRect(0, 0, w, h);
+  sctx.strokeStyle = "rgba(240,179,87,0.35)";
+  sctx.setLineDash([3, 3]); sctx.beginPath();
+  sctx.moveTo(0, h - 0.9 * h); sctx.lineTo(w, h - 0.9 * h); sctx.stroke();
+  sctx.setLineDash([]);
+  sctx.strokeStyle = "#7aa7ff"; sctx.lineWidth = 1.4; sctx.beginPath();
+  healthHist.forEach((v, i) => {
+    const x = i / 179 * w, y = h - clamp(v, 0, 1) * h;
+    i ? sctx.lineTo(x, y) : sctx.moveTo(x, y);
+  });
+  sctx.stroke();
+}, 250);
+
+/* ---------------- wiring ---------------- */
+setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
+simTick();
+
+// when served by coherence_bridge.py, prefer its own /api/latest and go live
+if (location.protocol.startsWith("http")) {
+  $("endpoint").value = location.origin + "/api/latest";
+  fetch($("endpoint").value, { cache: "no-store" })
+    .then(r => r.ok ? r.json() : null)
+    .then(p => { if (p && typeof p.health === "number") setMode("live"); })
+    .catch(() => {});
+}
+
+$("btnSim").onclick = () => setMode("sim");
+$("btnLive").onclick = () => setMode("live");
+$("btnHist").onclick = enterHistory;
+$("btnPlay").onclick = () => setPlaying(!hist.playing);
+$("btnSpeed").onclick = () => {
+  hist.speed = SPEEDS[(SPEEDS.indexOf(hist.speed) + 1) % SPEEDS.length];
+  $("btnSpeed").textContent = hist.speed + "×";
+  if (hist.playing) setPlaying(true);
+};
+$("tlScrub").addEventListener("input", e => seek(+e.target.value));
+$("btnCoh").onclick = () => fireEvent("coherence");
+$("btnPaz").onclick = () => fireEvent("pazuzu");
+$("btnCalm").onclick = calm;
+$("btnPause").onclick = () => { paused = !paused; $("btnPause").textContent = paused ? "Resume" : "Pause"; };
+$("btnHelp").onclick = () => $("help").classList.add("open");
+$("hudToggle").onclick = () => $("hud").classList.toggle("hidden");
+document.addEventListener("keydown", e => {
+  if (e.key === "h" || e.key === "H") $("hud").classList.toggle("hidden");
+  if (e.key === "Escape") $("help").classList.remove("open");
+});
+</script>
+</body>
+</html>

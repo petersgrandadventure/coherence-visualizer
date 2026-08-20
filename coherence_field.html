@@ -742,12 +742,15 @@ setInterval(() => {
 setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
 simTick();
 
-// when served by coherence_bridge.py, prefer its own /api/latest and go live
+// when served by coherence_bridge.py, prefer its own /api/latest and go live;
+// on any other host (e.g. a static demo) the probe 404s and sim mode stands
 if (location.protocol.startsWith("http")) {
-  $("endpoint").value = location.origin + "/api/latest";
-  fetch($("endpoint").value, { cache: "no-store" })
+  const probe = location.origin + "/api/latest";
+  fetch(probe, { cache: "no-store" })
     .then(r => r.ok ? r.json() : null)
-    .then(p => { if (p && typeof p.health === "number") setMode("live"); })
+    .then(p => {
+      if (p && typeof p.health === "number") { $("endpoint").value = probe; setMode("live"); }
+    })
     .catch(() => {});
 }
 

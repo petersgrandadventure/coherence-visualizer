@@ -4,6 +4,11 @@ A particle-field visualizer for [coherence_monitor](https://codeberg.org/TaoishT
 the state of the field is readable at a glance, the way the GCP Dot compresses
 network variance into a single color.
 
+**▶ [Live demo](https://petersgrandadventure.github.io/coherence-visualizer/)** —
+runs in simulation mode; try the **Coherence event** and **Pazuzu surge** buttons.
+(For live monitor data, run the bridge below and open `http://localhost:5005`
+instead — or paste your bridge's address into the demo's endpoint field.)
+
 ## Quick start
 
 Open `coherence_field.html` in any browser. It starts in **simulation mode** with a

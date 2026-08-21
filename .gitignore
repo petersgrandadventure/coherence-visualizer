@@ -10,3 +10,8 @@ venv/
 
 # os
 .DS_Store
+
+# upstream monitor lives here untracked (its own project + venv + data)
+monitor/
+.DS_Store
+*.log

@@ -15,3 +15,4 @@ venv/
 monitor/
 .DS_Store
 *.log
+reg/accel_stream

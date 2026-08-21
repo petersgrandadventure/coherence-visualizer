@@ -69,6 +69,15 @@ HUD: threshold ticks on each metric bar match the monitor's safety table
 (σ 0.053, ρ 0.95, r/dₛ 0.93, λ 1.15/1.30), plus a 3-minute Health sparkline and the
 latest payload hash. Press **H** to hide the panel for a pure field view.
 
+## REG calibration instrument (v2 direction)
+
+A review of the upstream monitor's algorithm showed its Health metric is
+structurally constant (a step function of a matrix rank), so the project now
+includes its own GCP-style random-event-generator instrument built from the
+Mac's physical noise sources — microphone ADC noise, the built-in accelerometer,
+and the camera sensor — with a CSPRNG control, per-egg empirical calibration,
+health tests, and covariate logging. See [reg/README.md](reg/README.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -497,13 +497,20 @@ function deriveField() {
 /* ---------------- particle field ---------------- */
 const canvas = $("field"), ctx = canvas.getContext("2d");
 let W = 0, H = 0, CX = 0, CY = 0, R = 0, DPR = 1;
+let particleField = null;   // assigned once the particles are constructed
 function resize() {
+  const prevR = R;
   DPR = Math.min(window.devicePixelRatio || 1, 2);
   W = window.innerWidth; H = window.innerHeight;
   canvas.width = W * DPR; canvas.height = H * DPR;
   canvas.style.width = W + "px"; canvas.style.height = H + "px";
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   CX = W / 2; CY = H / 2; R = Math.min(W, H) * 0.42;
+  // keep the cloud proportional if the window was resized after particle init
+  if (particleField && prevR > 0 && Math.abs(R - prevR) > 1) {
+    const k = R / prevR;
+    for (const p of particleField) p.r *= k;
+  }
   ctx.fillStyle = "#05070e"; ctx.fillRect(0, 0, W, H);
 }
 window.addEventListener("resize", resize);
@@ -540,6 +547,7 @@ for (let i = 0; i < N; i++) {
   });
   parts[i].r = R * (0.16 + 0.36 * parts[i].hr);
 }
+particleField = parts;
 
 function hueMix(a, b, t) {            // shortest-path hue interpolation
   let d = ((b - a + 540) % 360) - 180;
@@ -550,13 +558,16 @@ let lastFrame = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
   if (paused) { lastFrame = now; return; }
-  const dt = clamp((now - lastFrame) / 1000, 0.001, 0.05);
+  const dtRaw = (now - lastFrame) / 1000;
+  const dt = clamp(dtRaw, 0.001, 0.05);   // physics step stays bounded
   lastFrame = now;
 
-  // ease displayed metrics toward the latest packet
+  // ease displayed metrics on wall-clock time, so throttled/background tabs
+  // still converge to the latest packet instead of crawling
+  const ease = 1 - Math.pow(0.25, Math.min(dtRaw, 3));
   for (const k in target) {
     if (typeof target[k] === "number" && k !== "timestamp")
-      m[k] = lerp(m[k], target[k], 1 - Math.pow(0.25, dt));
+      m[k] = lerp(m[k], target[k], ease);
   }
   deriveField();
 

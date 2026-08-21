@@ -240,7 +240,9 @@ class CameraEgg(Egg):
                 gray_std=round(a["std_sum"] / n, 2),
                 frac_saturated=round(a["sat"] / a["npix"], 5),
                 frac_black=round(a["blk"] / a["npix"], 5),
-                lens_covered=bool(gm < 8.0),
+                # AE maxes gain under a cover, so a covered sensor reads a FLAT mid-gray,
+                # not black: key on the flat field (spatial std) as well as darkness
+                lens_covered=bool(gm < 8.0 or (a["std_sum"] / n) < 15.0),
                 raw_lsb_p1=round(a["lsb_1"] / a["lsb_n"], 5),
                 temporal_r=self._pearson01(a["pairs"], a["sx"], a["sy"], a["sxy"]),
             )

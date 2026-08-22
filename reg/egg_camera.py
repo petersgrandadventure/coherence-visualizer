@@ -19,7 +19,7 @@ the default: 1200 bits/frame, ~36 kbit/s at 30 fps, ample for the daemon.
 Region sums across the sensor are NOT independent (quadrant correlations up to
 -0.28: shared ISP gain/exposure), so the whole sensor is ONE egg.  Regions are
 also not interchangeable (a ceiling light or reflection gives saturated or
-fixed-pattern blocks), so the folded bits of each frame are emitted in a fixed
+fixed-pattern blocks), so the folded bits of each frame are emitted in
 a fresh seeded permutation of the block grid on every frame: every 200-bit
 trial the daemon forms then samples the whole sensor, the canonical trial is
 representative of the stream, and block-column parity is not locked to the

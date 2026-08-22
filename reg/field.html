@@ -483,7 +483,10 @@ const HUES = { mic: 205, accel: 275, camera: 160 };
 const hueOf = name => HUES[name] ?? (name.startsWith("camera") ? 160 : 330);
 const GOLD_HUE = 46;
 // converge toward gold along the arc that does not cross the other identity hues
-const hueToGold = (hue, C) => hue > 180 ? lerp(hue, GOLD_HUE + 360, C) % 360 : lerp(hue, GOLD_HUE, C);
+// Converge every identity hue DOWNWARD toward gold (through teal/green), never upward
+// through magenta/red: red is reserved for INSTRUMENT faults and a family must never
+// look like one. A brief hue coincidence between two converging families is harmless.
+const hueToGold = (hue, C) => lerp(hue, GOLD_HUE, C);
 
 /* ---------------- LIVE ---------------- */
 const live = { timer: null, fails: 0, restarts0: {}, restartsChanged: "", lastOk: 0 };

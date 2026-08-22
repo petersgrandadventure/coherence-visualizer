@@ -462,7 +462,7 @@ function healthLine(name, h, source) {
     if (r && isNum(r.x)) rms = (r.x + r.y + r.z) / 3; else if (isNum(r)) rms = r;
     return `${fint(h.events_per_second)} ev/s · rms ${fn(rms, 0)} LSB`;
   }
-  if (name.startsWith("camera")) return `${h.lens_covered === false ? "uncovered" : "covered"} · ${fn(h.fps, 0)} fps · gray ${fn(h.gray_mean, 0)}`;
+  if (name.startsWith("camera")) return `${(h.lens_covered === true || (h.gray_std != null && h.gray_std < 15)) ? "covered" : "uncovered"} · ${fn(h.fps, 0)} fps · gray ${fn(h.gray_mean, 0)}`;
   if (name === CONTROL) return `CSPRNG · ${fint(h.rate)} b/s`;
   if (source === "history") return "replay";
   const keys = Object.keys(h).slice(0, 2);

@@ -16,3 +16,6 @@ monitor/
 .DS_Store
 *.log
 reg/accel_stream
+
+# generated calibration data and reports
+data/

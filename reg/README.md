@@ -54,6 +54,40 @@ simultaneous band from the control — the band a live display must use instead
 of the classic pointwise parabola, which is exited about half the time under
 the null.
 
+## Live instrument (bridge + field)
+
+Once a calibration exists, the live display runs on top of the same daemon:
+
+```bash
+cd ~/coherence-visualizer/reg && ../monitor/venv/bin/python reg_bridge.py   # http://localhost:5006
+```
+
+`reg_bridge.py` (read-only on the database) scores every second with constants
+estimated from history *older* than the live window, computes the GCP
+statistics (per-egg z, Stouffer Z across the physical eggs, cumulative Σz and
+Σ(z²−1)), bootstraps the simultaneous band and the window null distributions
+from the control egg, and serves them as JSON (`/api/state`, `/api/history`,
+`/api/calibration`) together with `field.html` at `/`.
+
+`field.html` is the re-mapped Coherence Field:
+
+- each physical egg is a particle family on its own ring with an identity hue
+  (mic, accel, camera); the ring breathes with the egg's current z;
+- the control egg is a grey ghost family that never changes;
+- as the 10-minute network statistic climbs, the families' drift aligns and
+  their hues converge toward gold;
+- the outer ring is the GCP cumulative-deviation plot bent into a circle, with
+  the bootstrap 95 % band drawn as a translucent annulus, the 99 % limits
+  dashed, and the control egg's own cumulative trace ghosted alongside —
+  the real trace leaving the band while the ghost stays inside is the signal;
+- the status chip says CHANCE-LIKE / ATTENTION / EXCURSION with the numbers
+  that triggered it, and INSTRUMENT (crimson) for stale eggs, uncalibrated
+  constants, restarts or a dead endpoint — never for the physics.
+
+It also has a simulation mode (with injections showing what a mean shift,
+variance excess, correlated eggs or an instrument fault look like) and a
+history mode that replays any span of the database.
+
 ## Honest expectations
 
 The GCP's published effect is ~0.3σ per pre-registered event pooled over ~60

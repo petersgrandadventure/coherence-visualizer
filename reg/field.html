@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coherence Field — REG instrument</title>
+<style>
+  :root {
+    --bg: #05070e;
+    --panel: rgba(13, 17, 30, 0.82);
+    --panel-border: rgba(122, 148, 210, 0.16);
+    --ink: #dce4f5;
+    --ink-2: #8d99b8;
+    --ink-3: #5a6480;
+    --accent: #7aa7ff;
+    --good: #43d17c;
+    --gold: #ffd76b;
+    --crit: #f0586a;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--ink); font: 13px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, sans-serif; }
+  #field { position: fixed; inset: 0; display: block; }
+
+  /* ---------- HUD panel ---------- */
+  #hud {
+    position: fixed; top: 14px; left: 14px; width: 304px;
+    max-height: calc(100vh - 28px); overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px;
+    backdrop-filter: blur(10px); padding: 12px 14px 10px;
+    transition: transform .25s ease, opacity .25s ease; z-index: 10;
+    scrollbar-width: thin;
+  }
+  #hud.hidden { transform: translateX(-330px); opacity: 0; pointer-events: none; }
+  #hud h1 { font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 8px; }
+  #hud h1 span { color: var(--ink-3); font-weight: 400; letter-spacing: .04em; text-transform: none; }
+
+  #status {
+    display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; border-radius: 8px; margin-bottom: 10px;
+    background: rgba(67,209,124,.08); border: 1px solid rgba(67,209,124,.25);
+    font-family: var(--mono); font-size: 11px; letter-spacing: .03em; line-height: 1.35;
+  }
+  #status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); flex: none; margin-top: 4px; }
+  #status .lvl { font-weight: 700; letter-spacing: .08em; }
+  #status .why { color: var(--ink-2); }
+  #status.attn { background: rgba(255,215,107,.08); border-color: rgba(255,215,107,.3); }
+  #status.attn .dot { background: var(--gold); }
+  #status.exc  { background: rgba(255,215,107,.12); border-color: rgba(255,215,107,.45); animation: pulse 1.1s infinite; }
+  #status.exc .dot { background: var(--gold); animation: dotpulse 1.1s infinite; }
+  #status.inst { background: rgba(240,88,106,.1); border-color: rgba(240,88,106,.35); }
+  #status.inst .dot { background: var(--crit); }
+  @keyframes pulse { 50% { border-color: rgba(255,215,107,.9); } }
+  @keyframes dotpulse { 50% { transform: scale(1.5); } }
+
+  .card { border: 1px solid var(--panel-border); border-radius: 9px; padding: 7px 9px; margin-bottom: 7px; background: rgba(0,0,0,.18); }
+  .card h2 { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .card h2 .sw { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .card h2 .tag { margin-left: auto; font-family: var(--mono); font-size: 9.5px; letter-spacing: .05em; text-transform: none; color: var(--crit); }
+  .card .sub { font-size: 10.5px; color: var(--ink-3); font-family: var(--mono); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card.stale { opacity: .6; }
+  .mrow { display: grid; grid-template-columns: 58px 1fr 64px; gap: 8px; align-items: center; margin: 3px 0; }
+  .mrow .lbl { color: var(--ink-2); font-size: 11px; }
+  .mrow .val { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--ink); white-space: nowrap; }
+  .zbar { position: relative; height: 5px; border-radius: 3px; background: rgba(122,148,210,.12); }
+  .zbar .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(122,148,210,.35); }
+  .zbar .fill { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; transition: left .3s ease, width .3s ease; }
+  .zbar .tick { position: absolute; top: -2px; bottom: -2px; width: 1px; background: rgba(255,215,107,.5); }
+  table.net { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 10.5px; }
+  table.net th { color: var(--ink-3); font-weight: 400; text-align: right; padding: 1px 2px; font-size: 9.5px; }
+  table.net th:first-child, table.net td:first-child { text-align: left; color: var(--ink-2); }
+  table.net td { text-align: right; padding: 1px 2px; white-space: nowrap; }
+  table.net td.hot { color: var(--gold); }
+  .kv { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); display: flex; justify-content: space-between; gap: 6px; margin: 1px 0; }
+  .kv b { color: var(--ink); font-weight: 500; }
+  #spark { width: 100%; height: 44px; display: block; margin-top: 6px; }
+  .caption { font-size: 10px; color: var(--ink-3); display: flex; justify-content: space-between; margin-top: 2px; }
+  #clockRow { font-family: var(--mono); font-size: 10px; color: var(--ink-3); margin-top: 6px; display: flex; justify-content: space-between; }
+
+  /* ---------- bottom dock (timeline + control bar) ---------- */
+  #dock { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: calc(100vw - 24px); z-index: 10; }
+  #controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 8px 10px; backdrop-filter: blur(10px); max-width: 100%; }
+  button, select { font: 11.5px/1 -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: rgba(122,148,210,.12); border: 1px solid rgba(122,148,210,.2); border-radius: 7px; padding: 7px 11px; cursor: pointer; white-space: nowrap; }
+  select { padding: 6px 8px; }
+  button:hover { background: rgba(122,148,210,.22); }
+  button:disabled { opacity: .35; cursor: default; }
+  button.active { background: rgba(122,167,255,.25); border-color: rgba(122,167,255,.5); }
+  button.inj.on { background: rgba(255,215,107,.2); border-color: rgba(255,215,107,.5); }
+  #endpoint { font: 11px var(--mono); color: var(--ink); background: rgba(0,0,0,.3); border: 1px solid rgba(122,148,210,.2); border-radius: 7px; padding: 7px 9px; width: 212px; }
+  #liveState { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
+  #liveState.ok { color: var(--good); }
+  #liveState.bad { color: var(--crit); }
+  .sep { width: 1px; height: 20px; background: rgba(122,148,210,.2); }
+
+  /* ---------- history timeline ---------- */
+  #timeline { width: min(820px, calc(100vw - 24px)); display: none; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 8px 10px; backdrop-filter: blur(10px); }
+  #timeline.open { display: flex; }
+  #btnPlay { width: 34px; text-align: center; }
+  #btnSpeed { width: 52px; text-align: center; font-family: var(--mono); }
+  #tlWrap { flex: 1; position: relative; height: 40px; }
+  #tlCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #tlScrub { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+  #tlScrub::-webkit-slider-thumb { -webkit-appearance: none; width: 3px; height: 40px; border-radius: 2px; background: #dce4f5; box-shadow: 0 0 6px rgba(220,228,245,.8); }
+  #tlScrub::-moz-range-thumb { width: 3px; height: 40px; border: 0; border-radius: 2px; background: #dce4f5; }
+  #tlTime { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); min-width: 126px; text-align: right; }
+
+  /* ---------- help overlay ---------- */
+  #help { position: fixed; inset: 0; background: rgba(4,6,12,.86); backdrop-filter: blur(6px); z-index: 20; display: none; overflow-y: auto; padding: 40px 20px; }
+  #help.open { display: block; }
+  #help .hcard { max-width: 660px; margin: 0 auto; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 26px 30px; }
+  #help h2 { font-size: 16px; margin-bottom: 4px; }
+  #help h3 { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); margin: 18px 0 8px; }
+  #help p, #help li { color: var(--ink-2); font-size: 12.5px; }
+  #help ul { list-style: none; }
+  #help li { display: flex; gap: 10px; margin: 7px 0; align-items: baseline; }
+  #help li b { color: var(--ink); font-weight: 600; flex: none; width: 160px; }
+  #help .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; position: relative; top: 1px; }
+  #help .close { float: right; }
+  #help code { font-family: var(--mono); font-size: 11px; background: rgba(0,0,0,.35); padding: 1px 5px; border-radius: 4px; }
+  #help .note { border-left: 2px solid var(--gold); padding-left: 12px; margin-top: 14px; }
+
+  #hudToggle { position: fixed; top: 14px; left: 14px; z-index: 9; }
+  @media (max-width: 700px) { #hud { width: calc(100vw - 28px); } #endpoint { width: 130px; } }
+</style>
+</head>
+<body>
+<canvas id="field"></canvas>
+
+<button id="hudToggle" title="Toggle panel (H)">☰</button>
+
+<div id="hud">
+  <h1>Coherence Field <span>· REG instrument</span></h1>
+  <div id="status"><div class="dot"></div><div><div class="lvl">INITIALIZING</div><div class="why">waiting for data</div></div></div>
+  <div id="eggCards"></div>
+  <div class="card" id="netCard">
+    <h2>Network <span class="tag" id="netSrc" style="color:var(--ink-3)"></span></h2>
+    <table class="net">
+      <thead><tr><th>window</th><th>Stouffer Z</th><th>netvar z</th><th id="pHead">p</th></tr></thead>
+      <tbody id="netRows"></tbody>
+    </table>
+    <div class="sub" id="headRatio">—</div>
+  </div>
+  <div class="card" id="calCard">
+    <h2>Calibration <span class="tag" id="calTag"></span></h2>
+    <div id="calRows"></div>
+    <div class="sub" id="calBand">band —</div>
+    <div class="sub" style="white-space:normal">constants from history before the live window</div>
+  </div>
+  <canvas id="spark" width="276" height="44"></canvas>
+  <div class="caption"><span>Stouffer Z<sub>t</sub> · last 10 min · guides ±1.96</span><span id="sparkNow">—</span></div>
+  <div id="clockRow"><span id="clock">—</span><span id="age">—</span></div>
+</div>
+
+<div id="dock">
+<div id="timeline">
+  <select id="histHours" title="History span"><option value="1">1 h</option><option value="6">6 h</option><option value="24">24 h</option></select>
+  <button id="btnPlay" title="Play / pause replay (space)">⏵</button>
+  <button id="btnSpeed" title="Replay speed">60×</button>
+  <div id="tlWrap">
+    <canvas id="tlCanvas"></canvas>
+    <input id="tlScrub" type="range" min="0" max="0" value="0" step="1">
+  </div>
+  <div id="tlTime">—</div>
+</div>
+
+<div id="controls">
+  <button id="btnLive">Live</button>
+  <button id="btnSim" class="active">Simulation</button>
+  <button id="btnHist">History</button>
+  <input id="endpoint" value="http://localhost:5006/api/state" spellcheck="false" title="Bridge state endpoint">
+  <select id="winSel" title="Display window"><option value="600">10 min</option><option value="3600">1 h</option><option value="7200">2 h</option></select>
+  <button id="btnTrace" title="Outer ring trace">Trace: netvar</button>
+  <span id="liveState"></span>
+  <div class="sep"></div>
+  <button class="inj" id="injMean" title="Add +0.3 to every physical egg's z for 5 min">Mean shift +0.3σ</button>
+  <button class="inj" id="injVar" title="Multiply physical z by √1.3 for 5 min">Variance ×1.3</button>
+  <button class="inj" id="injCorr" title="Add one shared N(0, 0.6) draw per second to all physical eggs for 5 min">Correlated eggs</button>
+  <button class="inj" id="injFault" title="Mark one egg stale for 5 min">Instrument fault</button>
+  <button id="btnCalm">Calm</button>
+  <div class="sep"></div>
+  <button id="btnPause">Pause</button>
+  <button id="btnHelp">How to read</button>
+</div>
+</div>
+
+<div id="help">
+  <div class="hcard">
+    <button class="close" onclick="document.getElementById('help').classList.remove('open')">Close</button>
+    <h2>How to read the field</h2>
+    <p>Every second each <em>egg</em> — a physical noise source on this Mac — produces one 200-bit trial, scored as a z-value against its own empirical calibration. The field turns those z-values, their network combination, and the running cumulative statistic into motion, so the state of the instrument can be read at a glance, with the control beside it.</p>
+
+    <h3>Families and rings</h3>
+    <ul>
+      <li><span class="sw" style="background:hsl(205,80%,62%)"></span><b>mic</b> Microphone / ADC thermal noise. Inner rings, one per physical egg, assigned in the order the eggs appear. The name sits at each ring's 12 o'clock so identity never depends on colour alone.</li>
+      <li><span class="sw" style="background:hsl(275,80%,66%)"></span><b>accel</b> Accelerometer LSB parity.</li>
+      <li><span class="sw" style="background:hsl(160,75%,55%)"></span><b>camera</b> Image-sensor noise through the ISP.</li>
+      <li><span class="sw" style="background:hsl(215,15%,60%)"></span><b>control (ghost)</b> <code>/dev/random</code>, run through byte-identical code. The sparse grey family on the outermost inner ring. It never changes colour and ignores coherence — it is what chance looks like on this machine.</li>
+    </ul>
+
+    <h3>Breathing = each egg's z</h3>
+    <p>A ring's radius breathes with its egg's z-value (eased over ~5 s): outward for positive z, inward for negative, ±10 % per σ, capped at ±3σ. Particle brightness follows |z|. A stale egg (no data for more than 10 s, or a simulated fault) dims to a quarter and its card gets a <em>stale</em> tag.</p>
+
+    <h3>Convergence = coherence drive</h3>
+    <p>From the 10-minute window the page takes <code>s = max(|Stouffer Z|, netvar z)</code> and maps it to a drive <code>C = smoothstep(1, 3, s)</code>. At <code>C = 0</code> every family drifts at its own speed and direction in its identity hue; as <code>C → 1</code> the families co-rotate at one shared speed and their hues converge toward gold, with more glow. The control ghost ignores <code>C</code> entirely — if the grey ring starts to look like the others, that is a bug, not a signal.</p>
+
+    <h3>The outer ring = the GCP cumulative-deviation plot, bent into a circle</h3>
+    <p>Starting at 12 o'clock and running clockwise over the display window, the trace is the network's cumulative deviation — by default the <em>network variance</em> Σ(Z<sub>t</sub>²−1), or, with the toggle, the <em>mean shift</em> Σz. Its radial offset is the value divided by the 95 % band half-width at that sample count, so the translucent annulus is the 95 % band and the faint dashed rings are the 99 % limits. Where the trace leaves the 95 % band it turns gold. The thin grey line is the control egg's own cumulative trace on the same scale. The bright dot is <em>now</em>.</p>
+    <p>The band is <strong>simultaneous</strong>: its constants come from bootstrap paths of the control egg's own z-scores, chosen so 95 % (99 %) of whole paths stay inside for every step. The classic pointwise parabola (±1.96√n) is exited by about half of all purely random paths somewhere along their length — a display that draws it will cry wolf every other window. Nothing is drawn before 30 samples.</p>
+
+    <h3>Status levels</h3>
+    <ul>
+      <li><span class="sw" style="background:#43d17c"></span><b>CHANCE-LIKE</b> Nothing departs from the control's behaviour.</li>
+      <li><span class="sw" style="background:#ffd76b"></span><b>ATTENTION</b> The trace head is outside the 95 % band, or the 10-minute statistic has p &lt; 0.05 (empirical vs control history in LIVE, analytic otherwise).</li>
+      <li><span class="sw" style="background:#ffd76b"></span><b>EXCURSION (pulsing)</b> Outside the 99 % band, or p &lt; 0.01.</li>
+      <li><span class="sw" style="background:#f0586a"></span><b>INSTRUMENT</b> A physical egg is stale, calibration is theoretical, an egg helper restarted during this session, the endpoint failed three polls, or the server's data is older than 30 s. Statistics are not to be trusted until this clears.</li>
+    </ul>
+
+    <h3>Modes</h3>
+    <p><b>Live</b> polls <code>reg_bridge.py</code> (<code>/api/state?window=W</code>) every 2 s; tail probabilities are empirical — the fraction of independent windows, bootstrapped from the control egg's own z-history, at least as extreme (never reported as 0; floored at one over the null's size). Only eggs with empirical constants that agree with their canonical trial are scored; the rest are listed as excluded. <b>Simulation</b> runs synthetic Binomial(200, ½) eggs with injectable effects (each lasts 5 min): a mean shift, a variance inflation, correlated eggs (what network variance is built to detect), and an instrument fault; p-values there are analytic. <b>History</b> replays the bridge's per-second record; scrubbing sets <em>now</em> and everything is recomputed from the z arrays up to that moment. Gold ticks in the strip mark where the 10-minute |Stouffer Z| exceeded 1.96.</p>
+
+    <p class="note">An honest note: the GCP's published effect is ~0.3σ per pre-registered event, pooled across ~60 devices. A three-egg home instrument cannot detect an effect that size. This page's job is narrower and more useful: to show, against a defined null and with the control drawn beside it, whether this field ever departs from chance — and to say so in numbers.</p>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Coherence Field — REG instrument visualizer (v2)
+
+   DATA CONTRACT (reg_bridge.py / reg_stats.py)
+   GET /api/state?window=W  →  {
+     now, window, t0, physical:[egg…], excluded:[{egg, reason}], calibrated:bool,
+     band_source:"control bootstrap"|"synthetic normal (…)",
+     eggs:{ name:{ physical, mu, sigma, n_cal, cal_source, z_now, stale_s,
+                   stale_trial_s, restarts, restarts_in_window, regime?, health:{…} } },
+     band:{ sd_z, sd_nv, n_min, n_len, c95_z, c99_z, c95_nv, c99_nv, source, fixed_start },
+     windows:{ "60"|"600"|"3600": { Z, netvar_z, n, per_egg_Z:{egg:Z},
+               p_absZ_control (two-sided on |Z|), p_netvar_control (upper),
+               p_netvar_low_control (lower), p_source, n_eff,
+               control_Z, control_netvar_z } },
+     series:{ ts:[…], z:{egg:[…]}, Z:[…], cum_z:{egg:[…]}, cum_nv:{egg:[…]},
+              n:{egg:[…]}, net_cum_z:[…], net_cum_nv:[…], net_n:[…],
+              band_n:"net_n", first_present_ts:{…} } }
+   Every numeric array entry may be null (numpy nan → JSON null); the
+   cumulative arrays treat a missing second as contributing 0 and the count
+   arrays do not advance for it — the band half-width c·sd·√n is therefore
+   drawn against series.n / net_n (present seconds), never the sample index.
+   Only eggs with empirical constants are in `physical`; the rest are listed
+   in `excluded` with the reason. netvar_z = (Σ Z_t² − n)/(sd_nv·√n).
+   GET /api/history?hours=H  →  { t0, step:1, physical:[…], excluded:[…],
+                                  constants:{egg:{mu, sigma, n, source}}, band,
+                                  before_ts, z:{egg:[…]}, Z:[…] }
+
+   All three modes feed ONE derived state object `D` (see deriveFromZ /
+   stateFromServer) that the particle engine, outer ring and HUD consume:
+     D = { now, window, source, physical:[…], eggs:{name:{…}}, calibrated, band,
+           windows:{"60":{Z, netvar_z, n, per_egg_Z, p_absZ, p_netvar, p_source}},
+           series:{ len, Z, net_cum_z, net_cum_nv, net_n,
+                    ctrl_cum_z, ctrl_cum_nv, ctrl_n } }
+   ============================================================================ */
+
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const rnd = (a = 1, b) => b === undefined ? Math.random() * a : a + Math.random() * (b - a);
+const TAU = Math.PI * 2;
+const isNum = v => typeof v === "number" && Number.isFinite(v);
+const CONTROL = "control";
+const WINDOWS = [60, 600, 3600];
+const DEFAULT_BAND = { sd_z: 1, sd_nv: 1.414, c95_z: 3.06, c99_z: 3.68, c95_nv: 3.13, c99_nv: 3.73, n_min: 30 };
+
+/* ============================================================================
+   SECTION 1 · PURE STATISTICS (no DOM; testable in node between the markers)
+   ============================================================================ */
+/* @pure-begin */
+const REG = (() => {
+  // erfc — Numerical Recipes Chebyshev fit, |rel err| < 1.2e-7 everywhere
+  function erfc(x) {
+    const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
+    const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 +
+      t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+    return x >= 0 ? r : 2 - r;
+  }
+  const Phi = x => 0.5 * erfc(-x / Math.SQRT2);
+  const pAbsZ = Z => isNum(Z) ? erfc(Math.abs(Z) / Math.SQRT2) : null;       // 2(1 − Φ(|Z|))
+  const pUpper = z => isNum(z) ? 0.5 * erfc(z / Math.SQRT2) : null;          // 1 − Φ(z)
+
+  // band half-width at step n: c · sd · √max(n, n_min);  kind = "nv" | "z"
+  // (the Σz band is c95_z·1·√n; since nothing is drawn for n < n_min the max() is
+  //  identical to √n wherever the trace is drawn)
+  function bandHalf(kind, n, band, level = 95) {
+    const b = band || DEFAULT_BAND;
+    const c = b[`c${level}_${kind}`] ?? DEFAULT_BAND[`c${level}_${kind}`];
+    const sd = kind === "nv" ? (b.sd_nv ?? DEFAULT_BAND.sd_nv) : 1;
+    return c * sd * Math.sqrt(Math.max(n || 0, b.n_min ?? 30));
+  }
+
+  // Stouffer Z_t = Σ z / √k over the physical eggs present, for i in [start, end)
+  function stouffer(zs, physical, start, end) {
+    const out = new Array(end - start);
+    for (let i = start; i < end; i++) {
+      let s = 0, k = 0;
+      for (const e of physical) { const v = zs[e] ? zs[e][i] : null; if (isNum(v)) { s += v; k++; } }
+      out[i - start] = k ? s / Math.sqrt(k) : null;
+    }
+    return out;
+  }
+
+  // cumulative Σx, Σ(x²−1), count — null (missing) contributes 0 and no count
+  function cumulative(x) {
+    const n = x.length, cz = new Array(n), cnv = new Array(n), cnt = new Array(n);
+    let sz = 0, snv = 0, c = 0;
+    for (let i = 0; i < n; i++) {
+      const v = x[i];
+      if (isNum(v)) { sz += v; snv += v * v - 1; c++; }
+      cz[i] = sz; cnv[i] = snv; cnt[i] = c;
+    }
+    return { cz, cnv, n: cnt };
+  }
+
+  // window Stouffer Z = Σ Z_t/√n and netvar z = (Σ Z_t² − n)/√(2n) over the last w seconds
+  // ending at `end` (exclusive); Zt[j] holds Z for second j + ZtOffset
+  // netvar uses the band's empirical sd_nv (√2 for Gaussian z) so window and band scales agree
+  function windowStats(zs, physical, Zt, ZtOffset, end, w, band) {
+    const start = Math.max(0, end - w, ZtOffset);
+    const sdnv = (band && isNum(band.sd_nv) && band.sd_nv > 0) ? band.sd_nv : Math.SQRT2;
+    const per = {}, ctrl = {};
+    for (const e of Object.keys(zs)) {
+      let s = 0, s2 = 0, n = 0;
+      const a = zs[e] || [];
+      for (let i = start; i < end; i++) { const v = a[i]; if (isNum(v)) { s += v; s2 += v * v; n++; } }
+      if (physical.includes(e)) per[e] = n >= 10 ? s / Math.sqrt(n) : null;
+      if (e === CONTROL && n >= 10) { ctrl.Z = s / Math.sqrt(n); ctrl.nv = (s2 - n) / (sdnv * Math.sqrt(n)); }
+    }
+    let s = 0, s2 = 0, n = 0;
+    for (let i = start; i < end; i++) { const v = Zt[i - ZtOffset]; if (isNum(v)) { s += v; s2 += v * v; n++; } }
+    const st = { per_egg_Z: per, n, Z: null, netvar_z: null, control_Z: ctrl.Z ?? null, control_netvar_z: ctrl.nv ?? null };
+    if (n >= 10) { st.Z = s / Math.sqrt(n); st.netvar_z = (s2 - n) / (sdnv * Math.sqrt(n)); }
+    st.p_absZ = pAbsZ(st.Z); st.p_netvar = pUpper(st.netvar_z); st.p_source = "analytic";
+    return st;
+  }
+
+  /* deriveFromZ — the client-side equivalent of reg_stats.live_state.
+     zs: {egg: [z per second | null]}, indices are seconds; end = index of "now" + 1.
+     Window statistics look back max(window, 3600) s; series are cut to `window`. */
+  function deriveFromZ(zs, physical, end, window, band, opts = {}) {
+    const eggs = Object.keys(zs);
+    end = clamp(end, 0, Math.max(...eggs.map(e => zs[e].length), 0));
+    const span = Math.max(window, Math.max(...WINDOWS));
+    const spanStart = Math.max(0, end - span);
+    const Zspan = stouffer(zs, physical, spanStart, end);         // index i ↔ second spanStart+i
+    const windows = {};
+    for (const w of WINDOWS) windows[String(w)] = windowStats(zs, physical, Zspan, spanStart, end, w, band);
+    const cutStart = Math.max(spanStart, end - window);
+    const Z = Zspan.slice(cutStart - spanStart);
+    const net = cumulative(Z);
+    const ctrlZ = zs[CONTROL] ? zs[CONTROL].slice(cutStart, end) : [];
+    const ctrl = cumulative(ctrlZ);
+    const eggInfo = {};
+    for (const e of eggs) {
+      const a = zs[e];
+      let last = null, lastIdx = -1;
+      for (let i = end - 1; i >= Math.max(0, end - 3600); i--) if (isNum(a[i])) { last = a[i]; lastIdx = i; break; }
+      let stale_s = lastIdx < 0 ? null : end - 1 - lastIdx;
+      if (opts.forceStale && opts.forceStale.includes(e)) stale_s = Math.max(stale_s ?? 0, 11);   // sim fault: stale at once
+      const c = (opts.consts && opts.consts[e]) || {};
+      eggInfo[e] = {
+        physical: physical.includes(e), z_now: last, stale_s,
+        restarts: 0, mu: isNum(c.mu) ? c.mu : 100, sigma: isNum(c.sigma) ? c.sigma : Math.sqrt(50),
+        n_cal: isNum(c.n) ? c.n : 0, cal_source: c.source || opts.cal_source || "theoretical",
+        health: (opts.health && opts.health[e]) || {},
+      };
+    }
+    return {
+      now: isNum(opts.t0) ? opts.t0 + end - 1 : null, window, source: opts.source || "derived",
+      physical: physical.slice(), excluded: opts.excluded || [], eggs: eggInfo,
+      calibrated: opts.calibrated !== false, band: band || DEFAULT_BAND, band_source: (band && band.source) || null,
+      windows,
+      series: { len: Z.length, Z, net_cum_z: net.cz, net_cum_nv: net.cnv, net_n: net.n,
+                ctrl_cum_z: ctrl.cz, ctrl_cum_nv: ctrl.cnv, ctrl_n: ctrl.n },
+    };
+  }
+
+  /* stateFromServer — normalise /api/state JSON into the same D shape */
+  function stateFromServer(s) {
+    const ser = s.series || {};
+    const num = a => Array.isArray(a) ? a.map(v => isNum(v) ? v : null) : [];
+    const Z = num(ser.Z);
+    const windows = {};
+    for (const w of WINDOWS) {
+      const st = (s.windows && s.windows[String(w)]) || {};
+      const empirical = isNum(st.p_absZ_control) || isNum(st.p_netvar_control);
+      windows[String(w)] = {
+        Z: isNum(st.Z) ? st.Z : null, netvar_z: isNum(st.netvar_z) ? st.netvar_z : null, n: st.n || 0,
+        per_egg_Z: st.per_egg_Z || {},
+        p_absZ: empirical ? st.p_absZ_control : pAbsZ(st.Z),
+        p_netvar: empirical ? st.p_netvar_control : pUpper(st.netvar_z),
+        p_netvar_low: empirical ? st.p_netvar_low_control : (isNum(st.netvar_z) ? 1 - pUpper(st.netvar_z) : null),
+        p_source: empirical ? ("vs " + (st.p_source || "control history")) : "analytic (no control null)",
+        n_eff: isNum(st.n_eff) ? st.n_eff : null,
+        control_Z: st.control_Z, control_netvar_z: st.control_netvar_z,
+      };
+    }
+    const eggs = {};
+    for (const [e, info] of Object.entries(s.eggs || {})) eggs[e] = Object.assign({ health: {} }, info);
+    return {
+      now: s.now, window: s.window, source: "live", physical: s.physical || [], excluded: s.excluded || [], eggs,
+      calibrated: !!s.calibrated, band: Object.assign({}, DEFAULT_BAND, s.band || {}), windows,
+      band_source: s.band_source || (s.band && s.band.source) || null,
+      series: {
+        len: Z.length, Z,
+        net_cum_z: num(ser.net_cum_z), net_cum_nv: num(ser.net_cum_nv), net_n: num(ser.net_n),
+        ctrl_cum_z: num(ser.cum_z && ser.cum_z[CONTROL]), ctrl_cum_nv: num(ser.cum_nv && ser.cum_nv[CONTROL]),
+        ctrl_n: num(ser.n && ser.n[CONTROL]),
+      },
+    };
+  }
+
+  // trace head: last index with n ≥ n_min → {i, value, ratio}
+  function traceHead(D, kind) {
+    const s = D.series, vals = kind === "nv" ? s.net_cum_nv : s.net_cum_z, ns = s.net_n;
+    const nmin = D.band.n_min ?? 30;
+    for (let i = s.len - 1; i >= 0; i--) {
+      if (isNum(ns[i]) && ns[i] >= nmin && isNum(vals[i]))
+        return { i, value: vals[i], n: ns[i], ratio: vals[i] / bandHalf(kind, ns[i], D.band, 95),
+                 ratio99: vals[i] / bandHalf(kind, ns[i], D.band, 99) };
+    }
+    return null;
+  }
+
+  // coherence drive from the 10-min window
+  function coherenceDrive(D) {
+    const w = D.windows["600"] || {};
+    const s = Math.max(Math.abs(w.Z ?? 0), Math.max(w.netvar_z ?? 0, 0));
+    return { s, C: smooth(1, 3, s) };
+  }
+
+  return { erfc, Phi, pAbsZ, pUpper, bandHalf, stouffer, cumulative, windowStats, deriveFromZ, stateFromServer, traceHead, coherenceDrive };
+})();
+/* @pure-end */
+
+/* ============================================================================
+   SECTION 2 · FORMATTING
+   ============================================================================ */
+const MINUS = "−";
+const fz = (v, d = 2) => isNum(v) ? (v < 0 ? MINUS : "+") + Math.abs(v).toFixed(d) : "—";
+const fn = (v, d = 2) => isNum(v) ? (v < 0 ? MINUS + Math.abs(v).toFixed(d) : v.toFixed(d)) : "—";
+const fp = p => !isNum(p) ? "—" : p < 0.001 ? "<0.001" : p.toFixed(3);
+const fpct = p => isNum(p) ? ((1 - p) * 100).toFixed(1) + " %" : "—";
+const fint = v => isNum(v) ? Math.round(v).toLocaleString() : "—";
+const fk = v => !isNum(v) ? "—" : v >= 1e6 ? (v / 1e6).toFixed(2) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "k" : String(Math.round(v));
+const fmtTime = t => isNum(t) ? new Date(t * 1000).toLocaleTimeString() : "—";
+const fmtDateTime = t => isNum(t) ? new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—";
+
+function healthLine(name, h, source) {
+  h = h || {};
+  if (source === "sim") return name === CONTROL ? "CSPRNG · synthetic" : "synthetic Binomial(200, ½)";
+  if (name === "mic") return `${fn(h.rms_dbfs, 0)} dBFS · vol ${isNum(h.input_volume) ? h.input_volume : "—"}`;
+  if (name === "accel") {
+    const r = h.rms_lsb; let rms = null;
+    if (r && isNum(r.x)) rms = (r.x + r.y + r.z) / 3; else if (isNum(r)) rms = r;
+    return `${fint(h.events_per_second)} ev/s · rms ${fn(rms, 0)} LSB`;
+  }
+  if (name.startsWith("camera")) return `${h.lens_covered === false ? "uncovered" : "covered"} · ${fn(h.fps, 0)} fps · gray ${fn(h.gray_mean, 0)}`;
+  if (name === CONTROL) return `CSPRNG · ${fint(h.rate)} b/s`;
+  if (source === "history") return "replay";
+  const keys = Object.keys(h).slice(0, 2);
+  return keys.length ? keys.map(k => `${k} ${typeof h[k] === "object" ? "…" : h[k]}`).join(" · ") : "—";
+}
+
+/* ============================================================================
+   SECTION 3 · SHARED STATE + DATA MODES (live / sim / history)
+   ============================================================================ */
+let D = null;                 // current derived state (see contract)
+let mode = "sim";             // "sim" | "live" | "hist"
+let modeGen = 0;              // bumped by setMode(); pending fetches check it before touching D
+let paused = false;
+let traceKind = "nv";         // "nv" (network variance) | "z" (mean shift Σz)
+let displayWindow = 600;
+
+const HUES = { mic: 205, accel: 275, camera: 160 };
+const hueOf = name => HUES[name] ?? (name.startsWith("camera") ? 160 : 330);
+const GOLD_HUE = 46;
+// converge toward gold along the arc that does not cross the other identity hues
+const hueToGold = (hue, C) => hue > 180 ? lerp(hue, GOLD_HUE + 360, C) % 360 : lerp(hue, GOLD_HUE, C);
+
+/* ---------------- LIVE ---------------- */
+const live = { timer: null, fails: 0, restarts0: {}, restartsChanged: "", lastOk: 0 };
+function liveUrl() {
+  const base = $("endpoint").value.trim().replace(/[?#].*$/, "");
+  return `${base}?window=${displayWindow}`;
+}
+async function pollLive() {
+  if (paused) return;                               // Pause freezes the display AND the polling
+  const gen = modeGen;
+  try {
+    const r = await fetch(liveUrl(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
+    if (gen !== modeGen) return;                    // mode changed while the fetch was pending
+    if (!s || typeof s !== "object" || !s.series) throw new Error("no series");
+    D = REG.stateFromServer(s);
+    live.fails = 0; live.lastOk = performance.now();
+    for (const [e, info] of Object.entries(D.eggs)) {
+      if (!(e in live.restarts0)) live.restarts0[e] = info.restarts;
+      else if (info.restarts !== live.restarts0[e] && !live.restartsChanged)
+        live.restartsChanged = `${e} restarts ${live.restarts0[e]}→${info.restarts}`;
+    }
+    const age = Date.now() / 1000 - (s.now || 0);
+    setLiveState(age > 30 ? `stale ${Math.round(age)} s` : "receiving", age > 30 ? "bad" : "ok");
+  } catch (err) {
+    if (gen !== modeGen) return;
+    if (++live.fails >= 3) setLiveState(`no connection (${err.message})`, "bad");
+  }
+}
+function setLiveState(txt, cls) { const el = $("liveState"); el.textContent = txt; el.className = cls || ""; }
+
+/* ---------------- SIMULATION ---------------- */
+const SIM_EGGS = ["mic", "accel", "camera", CONTROL];
+const SIM_PHYS = ["mic", "accel", "camera"];
+const SIM_KEEP = 7200 + 3600;         // seconds of history kept
+const sim = { zs: {}, t0: 0, n: 0, inj: {}, lastDerive: 0, faultEgg: null };
+const INJ_DUR = 300, INJ_RAMP = 20;
+function simReset() {
+  sim.zs = Object.fromEntries(SIM_EGGS.map(e => [e, []]));
+  sim.t0 = Math.floor(Date.now() / 1000); sim.n = 0; sim.inj = {};
+}
+function binomialZ() {               // Binomial(200, ½) trial sum as z with μ=100, σ=√50
+  let s = 0;
+  for (let i = 0; i < 200; i++) s += Math.random() < 0.5;
+  return (s - 100) / Math.sqrt(50);
+}
+function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(TAU * v); }
+function injEnv(key, t) {            // trapezoid envelope 0..1 over [t0, t0+300] with 20 s ramps
+  const inj = sim.inj[key]; if (!inj) return 0;
+  const x = t - inj.t0;
+  if (x < 0 || x >= INJ_DUR) { if (x >= INJ_DUR) delete sim.inj[key]; return 0; }
+  return Math.min(1, x / INJ_RAMP, (INJ_DUR - x) / INJ_RAMP);
+}
+function simStep() {                 // one second of synthetic data
+  const t = sim.n;
+  const eMean = injEnv("mean", t), eVar = injEnv("var", t), eCorr = injEnv("corr", t); injEnv("fault", t);   // fault: expiry only
+  const shared = gauss() * 0.6;
+  const fault = !!sim.inj.fault;                    // binary: an instrument fault has no ramp
+  sim.faultEgg = fault ? SIM_PHYS[0] : null;
+  for (const e of SIM_EGGS) {
+    let z = binomialZ();
+    if (e !== CONTROL) {
+      z = z * (1 + (Math.sqrt(1.3) - 1) * eVar) + 0.3 * eMean + shared * eCorr;
+      if (fault && e === SIM_PHYS[0]) z = null;
+    }
+    const a = sim.zs[e]; a.push(z);
+  }
+  sim.n++;
+  if (sim.zs[CONTROL].length > SIM_KEEP) {   // trim the front; keep t0 consistent
+    const cut = sim.zs[CONTROL].length - SIM_KEEP;
+    for (const e of SIM_EGGS) sim.zs[e].splice(0, cut);
+    sim.t0 += cut; sim.n -= cut;
+    for (const k in sim.inj) sim.inj[k].t0 -= cut;
+  }
+}
+function simTick() {                 // catch up to wall-clock seconds (throttled tabs)
+  const want = Math.floor(Date.now() / 1000) - sim.t0 + 1;
+  let steps = want - sim.n;
+  if (steps > 900) { simReset(); steps = 1; }
+  while (steps-- > 0) simStep();
+  sim.lastDerive = performance.now();
+  D = REG.deriveFromZ(sim.zs, SIM_PHYS, sim.n, displayWindow, DEFAULT_BAND,
+    { t0: sim.t0, source: "sim", cal_source: "theoretical (simulation)", forceStale: sim.faultEgg ? [sim.faultEgg] : null });
+  for (const b of ["injMean", "injVar", "injCorr", "injFault"]) $(b).classList.toggle("on", !!sim.inj[b.slice(3).toLowerCase()]);
+}
+function inject(key) { if (mode !== "sim") return; sim.inj[key] = { t0: sim.n }; simTick(); }
+function calm() { sim.inj = {}; sim.faultEgg = null; simTick(); }
+
+/* ---------------- HISTORY ---------------- */
+const hist = { data: null, zs: {}, physical: [], excluded: [], len: 0, idx: 0, playing: false, speed: 60, timer: null, acc: 0, ticks: [], Z600: null, band: null, consts: null, calibrated: true };
+const SPEEDS = [1, 60, 600];
+function historyOrigin() {
+  try { return new URL($("endpoint").value.trim()).origin; } catch (e) { return location.origin; }
+}
+async function enterHistory() {
+  const prev = mode;
+  setMode("hist");
+  const gen = modeGen;
+  setLiveState("loading history…");
+  const hours = +$("histHours").value;
+  try {
+    const r = await fetch(`${historyOrigin()}/api/history?hours=${hours}`, { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (gen !== modeGen) return;                    // user left History while the fetch was pending
+    if (!j || !j.z || !j.Z) throw new Error("malformed");
+    hist.data = j;
+    hist.zs = Object.fromEntries(Object.entries(j.z).map(([e, a]) => [e, a.map(v => isNum(v) ? v : null)]));
+    // same selection as the bridge's live_state: no control, no camera-* variants
+    hist.physical = (j.physical || Object.keys(hist.zs)).filter(e => e !== CONTROL && !e.startsWith("camera-"));
+    hist.excluded = Array.isArray(j.excluded) ? j.excluded : [];
+    // the bridge's own constants and bootstrap band (the z were scored with these);
+    // an older bridge without them falls back to theoretical values, labelled as such
+    const consts = j.constants && typeof j.constants === "object" ? j.constants : null;
+    hist.band = j.band && isNum(j.band.c95_nv) ? Object.assign({}, DEFAULT_BAND, j.band) : null;
+    hist.consts = consts ? Object.fromEntries(Object.keys(hist.zs).map(e => {
+      const c = consts[e] || {};
+      return [e, { mu: c.mu, sigma: c.sigma, n: c.n, source: c.source ? `bridge · ${c.source}` : "theoretical (bridge sent no constants)" }];
+    })) : null;
+    hist.calibrated = !!(consts && hist.band) && hist.physical.every(e => (consts[e] || {}).source === "empirical") && !hist.excluded.length;
+    hist.len = j.Z.length;
+    // overview: Z_t and rolling 10-min |Stouffer Z| > 1.96 ticks
+    const Zt = REG.stouffer(hist.zs, hist.physical, 0, hist.len);
+    let s = 0, n = 0; const q = [];
+    hist.ticks = [];
+    for (let i = 0; i < hist.len; i++) {
+      const v = Zt[i]; q.push(v); if (isNum(v)) { s += v; n++; }
+      if (q.length > 600) { const o = q.shift(); if (isNum(o)) { s -= o; n--; } }
+      if (n >= 30 && Math.abs(s / Math.sqrt(n)) > 1.96) hist.ticks.push(i);
+    }
+    hist.Zt = Zt;
+    $("tlScrub").max = Math.max(0, hist.len - 1);
+    drawTimeline();
+    seek(hist.len - 1);
+    setLiveState(`history · ${hours} h · ${hist.len.toLocaleString()} s`, "ok");
+  } catch (err) {
+    if (gen !== modeGen) return;
+    setLiveState(`no history (${err.message})`, "bad");
+    setMode(prev === "hist" ? "sim" : prev);
+  }
+}
+function seek(i) {
+  if (!hist.len) return;
+  hist.idx = clamp(Math.round(i), 0, hist.len - 1);
+  $("tlScrub").value = hist.idx;
+  D = REG.deriveFromZ(hist.zs, hist.physical, hist.idx + 1, displayWindow, hist.band || DEFAULT_BAND,
+    { t0: hist.data.t0, source: "history", consts: hist.consts, excluded: hist.excluded, calibrated: hist.calibrated,
+      cal_source: hist.band ? "bridge constants (z pre-scored)" : "theoretical (calibration unavailable)" });
+  $("tlTime").textContent = fmtDateTime(hist.data.t0 + hist.idx);
+}
+function setPlaying(on) {
+  hist.playing = on && mode === "hist" && hist.len > 1;
+  if (hist.playing && hist.idx >= hist.len - 1) seek(0);     // play from the start when parked at the end
+  $("btnPlay").textContent = hist.playing ? "⏸" : "⏵";
+  clearInterval(hist.timer); hist.timer = null; hist.acc = 0;
+  if (hist.playing) hist.timer = setInterval(() => {
+    if (paused) return;
+    hist.acc += hist.speed / 10;                    // 100 ms ticks
+    const step = Math.floor(hist.acc); hist.acc -= step;
+    if (!step) return;
+    if (hist.idx >= hist.len - 1) setPlaying(false); else seek(hist.idx + step);
+  }, 100);
+}
+function drawTimeline() {
+  const c = $("tlCanvas"), w = c.clientWidth, h = c.clientHeight;
+  if (!w || !hist.len) return;
+  if (c.width !== Math.round(w * DPR)) { c.width = Math.round(w * DPR); c.height = Math.round(h * DPR); }
+  const g = c.getContext("2d");
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const n = hist.len, X = i => n > 1 ? i / (n - 1) * w : 0, Y = z => h / 2 - clamp(z, -4, 4) / 4 * (h / 2 - 2);
+  g.strokeStyle = "rgba(122,148,210,0.25)"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+  g.strokeStyle = "rgba(255,215,107,0.6)";
+  for (const i of hist.ticks) { g.beginPath(); g.moveTo(X(i), 1); g.lineTo(X(i), h - 1); g.stroke(); }
+  // per-column min/max envelope of Z_t
+  g.strokeStyle = "rgba(122,167,255,0.8)"; g.lineWidth = 1;
+  const cols = Math.floor(w);
+  g.beginPath();
+  for (let px = 0; px < cols; px++) {
+    const i0 = Math.floor(px / cols * n), i1 = Math.max(i0 + 1, Math.floor((px + 1) / cols * n));
+    let lo = Infinity, hi = -Infinity;
+    for (let i = i0; i < i1 && i < n; i++) { const v = hist.Zt[i]; if (isNum(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
+    if (lo === Infinity) continue;
+    g.moveTo(px + 0.5, Y(hi)); g.lineTo(px + 0.5, Y(lo) + 0.5);
+  }
+  g.stroke();
+}
+window.addEventListener("resize", drawTimeline);
+
+/* ---------------- mode switching ---------------- */
+function setMode(next) {
+  mode = next; modeGen++;
+  $("btnSim").classList.toggle("active", mode === "sim");
+  $("btnLive").classList.toggle("active", mode === "live");
+  $("btnHist").classList.toggle("active", mode === "hist");
+  for (const id of ["injMean", "injVar", "injCorr", "injFault", "btnCalm"]) $(id).disabled = mode !== "sim";
+  clearInterval(live.timer); live.timer = null;
+  setPlaying(false);
+  $("timeline").classList.toggle("open", mode === "hist");
+  if (mode === "live") { live.fails = 0; setLiveState("connecting…"); pollLive(); live.timer = setInterval(pollLive, 2000); }
+  else if (mode === "sim") { setLiveState(""); if (!sim.zs[CONTROL]) simReset(); simTick(); }
+}
+function setWindow(w) {
+  displayWindow = w;
+  if (mode === "sim") simTick();
+  else if (mode === "hist" && hist.len) seek(hist.idx);
+  else if (mode === "live") pollLive();
+}
+
+/* ============================================================================
+   SECTION 4 · ENGINE — eased display values derived from D
+   ============================================================================ */
+const E = { C: 0, Ctarget: 0, s: 0, zEma: {}, staleMul: {}, hue: 46, headRatio: 0 };
+function engineEase(dtRaw) {
+  if (!D) return;
+  const k5 = 1 - Math.exp(-dtRaw / 5);          // 5 s time constant (wall clock)
+  const k2 = 1 - Math.exp(-dtRaw / 2);
+  for (const [e, info] of Object.entries(D.eggs)) {
+    const z = isNum(info.z_now) ? info.z_now : 0;
+    E.zEma[e] = lerp(E.zEma[e] ?? 0, z, k5);
+    const stale = isStale(e, info);
+    E.staleMul[e] = lerp(E.staleMul[e] ?? 1, stale ? 0.25 : 1, k2);
+  }
+  const cd = REG.coherenceDrive(D);
+  E.s = cd.s; E.Ctarget = cd.C;
+  E.C = lerp(E.C, E.Ctarget, k2);
+  const head = REG.traceHead(D, traceKind);
+  E.headRatio = lerp(E.headRatio, head ? head.ratio : 0, k2);
+}
+function isStale(e, info) {
+  if (mode === "live") return isNum(info.stale_s) ? info.stale_s > 10 : true;
+  return !isNum(info.stale_s) || info.stale_s > 10;
+}
+
+/* ============================================================================
+   SECTION 5 · PARTICLES
+   ============================================================================ */
+const canvas = $("field"), ctx = canvas.getContext("2d");
+let W = 0, H = 0, CX = 0, CY = 0, R = 0, DPR = 1;
+const RINGS = [0.30, 0.42, 0.54];
+const FAM_DRIFT = [0.10, -0.075, 0.13, -0.11, 0.09];   // rad/s, own direction per family at C = 0
+const SHARED_OMEGA = 0.16;
+let fams = [];            // [{name, hue, r0, ring, parts:[…], drift, ctrl}]
+let famByName = {};
+function resize() {
+  const prevR = R;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  CX = W / 2; CY = H / 2; R = Math.min(W, H) * 0.44;
+  if (prevR > 0 && Math.abs(R - prevR) > 1) {
+    const k = R / prevR;
+    for (const f of fams) for (const p of f.parts) p.r *= k;
+  }
+  ctx.fillStyle = "#05070e"; ctx.fillRect(0, 0, W, H);
+}
+window.addEventListener("resize", resize);
+resize();
+
+function buildFamilies(physical, hasControl) {
+  fams = []; famByName = {};
+  physical.forEach((name, i) => {
+    const ring = i < RINGS.length ? RINGS[i] : RINGS[RINGS.length - 1] + 0.04 * (i - RINGS.length + 1);
+    fams.push(makeFamily(name, hueOf(name), ring, 300, FAM_DRIFT[i % FAM_DRIFT.length], false));
+  });
+  if (hasControl) fams.push(makeFamily(CONTROL, 215, 0.66, 150, 0.05, true));
+  for (const f of fams) famByName[f.name] = f;
+}
+function makeFamily(name, hue, ring, count, drift, ctrl) {
+  const parts = [];
+  for (let i = 0; i < count; i++) parts.push({
+    a: rnd(TAU), r: R * ring,
+    off: gauss() * (ctrl ? 0.012 : 0.018),        // radial scatter, fraction of R
+    wander: rnd(-1, 1), size: rnd(0.8, 2.0), tw: rnd(TAU), halo: i % 4 === 0,
+  });
+  return { name, hue, ring, parts, drift, ctrl, rDisp: R * ring };
+}
+
+let lastFrame = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (paused) { lastFrame = now; return; }
+  const dtRaw = (now - lastFrame) / 1000;
+  const dt = clamp(dtRaw, 0.001, 0.05);
+  lastFrame = now;
+  engineEase(Math.min(dtRaw, 3));
+
+  // (re)build families when the egg set changes
+  if (D) {
+    const want = D.physical.join(",") + (D.eggs[CONTROL] ? ",control" : "");
+    if (frame.sig !== want) { frame.sig = want; buildFamilies(D.physical, !!D.eggs[CONTROL]); }
+  }
+
+  // trail fade
+  ctx.globalCompositeOperation = "source-over";
+  ctx.fillStyle = "rgba(5,7,14,0.26)";
+  ctx.fillRect(0, 0, W, H);
+
+  drawOuterRing();
+
+  const C = E.C;
+  ctx.globalCompositeOperation = "lighter";
+  for (const f of fams) {
+    const z = E.zEma[f.name] ?? 0, az = Math.min(Math.abs(z), 3);
+    const target = R * f.ring * (1 + 0.10 * clamp(z, -3, 3));
+    f.rDisp = target;                                         // z already eased over 5 s
+    const staleMul = E.staleMul[f.name] ?? 1;
+    const omega = f.ctrl ? f.drift : lerp(f.drift, SHARED_OMEGA, C);
+    const hue = f.ctrl ? f.hue : hueToGold(f.hue, C);
+    const sat = f.ctrl ? 14 : Math.round(lerp(62, 92, C));
+    const lig = f.ctrl ? 62 : Math.round(lerp(60, 67, C));
+    const baseA = f.ctrl ? 0.10 + 0.06 * az / 3 : 0.17 + 0.22 * az / 3 + 0.26 * C;
+    const sizeK = f.ctrl ? 0.85 : 1 + 0.25 * az / 3 + 0.35 * C;
+    const wanderK = f.ctrl ? 0.35 : 0.35 * (1 - C);
+    const haloOn = !f.ctrl && C > 0.35;
+    for (const p of f.parts) {
+      p.tw += dt * 1.6;
+      p.a += (omega * (1 + wanderK * p.wander)) * dt;
+      const tr = target + p.off * R + Math.sin(p.tw) * 1.2;
+      p.r += (tr - p.r) * (1 - Math.pow(0.02, dt));
+      const x = CX + Math.cos(p.a) * p.r, y = CY + Math.sin(p.a) * p.r;
+      const alpha = clamp(baseA * (0.8 + 0.2 * Math.sin(p.tw * 1.3 + p.wander * 3)) * staleMul, 0, 0.9);
+      const size = p.size * sizeK;
+      ctx.fillStyle = `hsla(${Math.round(hue)},${sat}%,${lig}%,${alpha})`;
+      ctx.beginPath(); ctx.arc(x, y, size, 0, TAU); ctx.fill();
+      if (haloOn && p.halo) {
+        ctx.fillStyle = `hsla(${Math.round(hue)},${sat}%,${lig}%,${alpha * 0.10 * C})`;
+        ctx.beginPath(); ctx.arc(x, y, size * 3.4, 0, TAU); ctx.fill();
+      }
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+  drawRingLabels();
+}
+requestAnimationFrame(frame);
+
+const MONO = getComputedStyle(document.body).getPropertyValue("--mono");
+function drawRingLabels() {
+  ctx.font = "10px " + MONO;
+  ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  for (const f of fams) {
+    const info = D && D.eggs[f.name];
+    const stale = info && isStale(f.name, info);
+    const y = CY - f.rDisp - 5;
+    const txt = f.name + (stale ? " · stale" : "");
+    ctx.fillStyle = stale ? "rgba(240,88,106,0.85)" : "rgba(220,228,245,0.8)";
+    ctx.fillText(txt, CX, y);
+  }
+}
+
+/* ============================================================================
+   SECTION 6 · OUTER RING — cumulative deviation bent into a circle
+   ============================================================================ */
+const RING_C = 0.86, RING_HW = 0.085;
+function drawOuterRing() {
+  const rc = R * RING_C, hw = R * RING_HW;
+  // 95 % band annulus
+  ctx.fillStyle = "rgba(122,148,210,0.055)";
+  ctx.beginPath(); ctx.arc(CX, CY, rc + hw, 0, TAU); ctx.arc(CX, CY, rc - hw, 0, TAU, true); ctx.fill();
+  ctx.strokeStyle = "rgba(122,148,210,0.16)"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(CX, CY, rc + hw, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(CX, CY, rc - hw, 0, TAU); ctx.stroke();
+  // centre line
+  ctx.strokeStyle = "rgba(122,148,210,0.10)";
+  ctx.beginPath(); ctx.arc(CX, CY, rc, 0, TAU); ctx.stroke();
+  if (!D) return;
+  const band = D.band, c95 = band[`c95_${traceKind}`], c99 = band[`c99_${traceKind}`];
+  const k99 = isNum(c95) && isNum(c99) && c95 > 0 ? c99 / c95 : 1.2;
+  // 99 % limits
+  ctx.setLineDash([3, 5]); ctx.strokeStyle = "rgba(122,148,210,0.22)";
+  ctx.beginPath(); ctx.arc(CX, CY, rc + hw * k99, 0, TAU); ctx.stroke();
+  ctx.beginPath(); ctx.arc(CX, CY, rc - hw * k99, 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const s = D.series, win = D.window || displayWindow, nmin = band.n_min ?? 30;
+  const vals = traceKind === "nv" ? s.net_cum_nv : s.net_cum_z;
+  const cvals = traceKind === "nv" ? s.ctrl_cum_nv : s.ctrl_cum_z;
+  const theta = i => -Math.PI / 2 + TAU * (i / win);
+  const pt = (i, v, n) => {
+    const d = hw * clamp(v / REG.bandHalf(traceKind, n, band, 95), -1.6, 1.6);
+    return [CX + Math.cos(theta(i)) * (rc + d), CY + Math.sin(theta(i)) * (rc + d), Math.abs(v / REG.bandHalf(traceKind, n, band, 95))];
+  };
+  // control ghost trace
+  ctx.strokeStyle = "rgba(160,172,200,0.38)"; ctx.lineWidth = 1;
+  ctx.beginPath(); let pen = false;
+  for (let i = 0; i < s.len; i++) {
+    const n = s.ctrl_n[i], v = cvals[i];
+    if (!isNum(n) || n < nmin || !isNum(v)) { pen = false; continue; }
+    const [x, y] = pt(i, v, n);
+    pen ? ctx.lineTo(x, y) : ctx.moveTo(x, y); pen = true;
+  }
+  ctx.stroke();
+  // physical network trace: family-convergence hue, gold where |ratio| > 1
+  const hue = fams.length && !fams[0].ctrl ? hueToGold(fams[0].hue, E.C) : GOLD_HUE;
+  const baseCol = `hsla(${Math.round(hueToGold(hue, 0.5 * E.C))},${Math.round(lerp(60, 90, E.C))}%,64%,0.9)`;
+  const goldCol = "rgba(255,215,107,0.95)";
+  ctx.lineWidth = 1.6;
+  let prev = null, curGold = null; pen = false;
+  let head = null;
+  for (let i = 0; i < s.len; i++) {
+    const n = s.net_n[i], v = vals[i];
+    if (!isNum(n) || n < nmin || !isNum(v)) { if (pen) ctx.stroke(); pen = false; prev = null; continue; }
+    const p = pt(i, v, n); const gold = p[2] > 1;
+    if (!pen || gold !== curGold) {
+      if (pen) ctx.stroke();
+      ctx.strokeStyle = gold ? goldCol : baseCol;
+      ctx.beginPath();
+      if (prev) ctx.moveTo(prev[0], prev[1]); else ctx.moveTo(p[0], p[1]);
+      pen = true; curGold = gold;
+    }
+    ctx.lineTo(p[0], p[1]);
+    prev = p; head = { x: p[0], y: p[1], i, gold };
+  }
+  if (pen) ctx.stroke();
+  // now marker + faint sweep
+  if (head) {
+    const th = theta(head.i);
+    for (let k = 1; k <= 14; k++) {
+      const a0 = th - (k + 1) * 0.02, a1 = th - k * 0.02;
+      ctx.fillStyle = `rgba(220,228,245,${0.09 * (1 - k / 15)})`;
+      ctx.beginPath(); ctx.arc(CX, CY, rc + hw * k99, a0, a1); ctx.arc(CX, CY, rc - hw * k99, a1, a0, true); ctx.fill();
+    }
+    ctx.fillStyle = head.gold ? "#ffd76b" : "#dce4f5";
+    ctx.beginPath(); ctx.arc(head.x, head.y, 3, 0, TAU); ctx.fill();
+    ctx.fillStyle = head.gold ? "rgba(255,215,107,0.25)" : "rgba(220,228,245,0.2)";
+    ctx.beginPath(); ctx.arc(head.x, head.y, 8, 0, TAU); ctx.fill();
+  }
+}
+
+/* ============================================================================
+   SECTION 7 · STATUS + HUD
+   ============================================================================ */
+function statusOf() {
+  if (!D) return ["", "INITIALIZING", "waiting for data"];
+  const w = D.windows["600"] || {};
+  const head = REG.traceHead(D, traceKind);
+  const lbl = traceKind === "nv" ? "netvar" : "Σz";
+  const pw = traceKind === "nv" ? w.p_netvar : w.p_absZ;
+  const stat = traceKind === "nv" ? w.netvar_z : w.Z;
+  const analytic = !w.p_source || w.p_source.startsWith("analytic");
+  const pLabel = p => isNum(p) ? (analytic ? `analytic p ${fp(p)}` : `control pct ${fpct(p)}`) : "p —";
+  const nums = `10-min ${lbl} z ${fz(stat)} · ${pLabel(pw)}` + (head ? ` · head ${fn(head.ratio)}× band95` : "");
+  // INSTRUMENT
+  const problems = [];
+  for (const e of D.physical) {
+    const info = D.eggs[e]; if (!info) continue;
+    if (isStale(e, info)) problems.push(`${e} stale ${isNum(info.stale_s) ? info.stale_s + " s" : ""}`.trim());
+  }
+  for (const x of D.excluded || []) problems.push(`${x.egg}: not calibrated (${x.reason})`);
+  if (mode === "live") {
+    if (!D.calibrated && !(D.excluded || []).length) problems.push("calibration theoretical");
+    if (D.band_source && D.band_source.startsWith("synthetic")) problems.push(`band ${D.band_source}`);
+    if (live.restartsChanged) problems.push(live.restartsChanged);
+    if (live.fails >= 3) problems.push(`endpoint failed ${live.fails} polls`);
+    const age = Date.now() / 1000 - (D.now || 0);
+    if (age > 30) problems.push(`server data ${Math.round(age)} s old`);
+  }
+  if (problems.length) return ["inst", "INSTRUMENT", problems.join(" · ") + " · " + nums];
+  const pmin = Math.min(isNum(w.p_absZ) ? w.p_absZ : 1, isNum(w.p_netvar) ? w.p_netvar : 1);
+  const r = head ? Math.abs(head.ratio) : 0, r99 = head ? Math.abs(head.ratio99) : 0;
+  // the reason text quotes whichever test(s) fired, not just the current trace
+  const reasons = [];
+  if (isNum(w.p_absZ) && w.p_absZ < 0.05) reasons.push(`10-min Stouffer Z ${fz(w.Z)} · ${pLabel(w.p_absZ)}`);
+  if (isNum(w.p_netvar) && w.p_netvar < 0.05) reasons.push(`10-min netvar z ${fz(w.netvar_z)} · ${pLabel(w.p_netvar)}`);
+  if (r99 > 1) reasons.push(`cum ${lbl} head ${fn(head.ratio99)}× band99`);
+  else if (r > 1) reasons.push(`cum ${lbl} head ${fn(head.ratio)}× band95`);
+  const why = reasons.length ? reasons.join(" · ") : nums;
+  if (r99 > 1 || pmin < 0.01) return ["exc", "EXCURSION", why];
+  if (r > 1 || pmin < 0.05) return ["attn", "ATTENTION", why];
+  return ["", "CHANCE-LIKE", nums];
+}
+
+const hud = { sig: "", cards: {} };
+function buildCards(order) {
+  const wrap = $("eggCards"); wrap.innerHTML = ""; hud.cards = {};
+  for (const e of order) {
+    const isCtrl = e === CONTROL;
+    const hue = isCtrl ? "hsl(215,15%,60%)" : `hsl(${hueOf(e)},80%,62%)`;
+    const card = document.createElement("div"); card.className = "card";
+    card.innerHTML = `<h2><span class="sw" style="background:${hue}"></span>${e}<span class="tag"></span></h2>
+      <div class="mrow"><div class="lbl">z now</div><div class="zbar"><div class="mid"></div><div class="tick" style="left:${(1 - 1.96 / 3) / 2 * 100}%"></div><div class="tick" style="left:${(1 + 1.96 / 3) / 2 * 100}%"></div><div class="fill"></div></div><div class="val zv">—</div></div>
+      <div class="mrow"><div class="lbl">10-min Z</div><div class="zbar"><div class="mid"></div><div class="tick" style="left:${(1 - 1.96 / 3) / 2 * 100}%"></div><div class="tick" style="left:${(1 + 1.96 / 3) / 2 * 100}%"></div><div class="fill"></div></div><div class="val Zv">—</div></div>
+      <div class="sub"></div>`;
+    wrap.appendChild(card);
+    hud.cards[e] = { card, tag: card.querySelector(".tag"), zv: card.querySelector(".zv"), Zv: card.querySelector(".Zv"),
+      fills: card.querySelectorAll(".fill"), sub: card.querySelector(".sub") };
+  }
+}
+function setBar(fill, v, isTenMin = false) {   // ±3 bar from the centre; gold only for a 10-min Z beyond ±1.96
+  const x = clamp(isNum(v) ? v : 0, -3, 3) / 3 * 50;
+  fill.style.left = (50 + Math.min(0, x)) + "%"; fill.style.width = Math.abs(x) + "%";
+  fill.style.background = (isTenMin && isNum(v) && Math.abs(v) > 1.96) ? "var(--gold)" : "var(--accent)";
+}
+const spark = $("spark"), sctx = spark.getContext("2d");
+function updateHUD() {
+  const [cls, lvl, why] = statusOf();
+  const st = $("status"); st.className = cls;
+  st.querySelector(".lvl").textContent = lvl; st.querySelector(".why").textContent = why;
+  if (!D) return;
+  const order = [...D.physical, ...Object.keys(D.eggs).filter(e => !D.physical.includes(e))];
+  const sig = order.join(",");
+  if (hud.sig !== sig) { hud.sig = sig; buildCards(order); }
+  const w600 = D.windows["600"] || {};
+  for (const e of order) {
+    const c = hud.cards[e], info = D.eggs[e]; if (!c || !info) continue;
+    const stale = isStale(e, info);
+    c.card.classList.toggle("stale", stale);
+    c.tag.textContent = stale ? `stale${isNum(info.stale_s) ? " " + info.stale_s + " s" : ""}` : "";
+    c.zv.textContent = fz(info.z_now);
+    const Z = e === CONTROL ? w600.control_Z : (w600.per_egg_Z || {})[e];
+    c.Zv.textContent = fz(Z);
+    setBar(c.fills[0], info.z_now); setBar(c.fills[1], Z, true);
+    c.sub.textContent = healthLine(e, info.health, D.source);
+  }
+  // network card
+  const anyEmp = Object.values(D.windows).some(w => w.p_source && !w.p_source.startsWith("analytic"));
+  $("netSrc").textContent = anyEmp ? "p vs control history" : "p analytic";
+  $("pHead").textContent = anyEmp ? "p (pct)" : "p";
+  const rows = [];
+  for (const [w, lbl] of [["60", "1 min"], ["600", "10 min"], ["3600", "1 h"]]) {
+    const s = D.windows[w] || {};
+    const hotZ = isNum(s.p_absZ) && s.p_absZ < 0.05, hotN = isNum(s.p_netvar) && s.p_netvar < 0.05;
+    const ptxt = traceKind === "nv" ? s.p_netvar : s.p_absZ;
+    rows.push(`<tr><td>${lbl}</td><td class="${hotZ ? "hot" : ""}">${fz(s.Z)}</td><td class="${hotN ? "hot" : ""}">${fz(s.netvar_z)}</td><td class="${(traceKind === "nv" ? hotN : hotZ) ? "hot" : ""}">${fp(ptxt)}${anyEmp && isNum(ptxt) ? ` (${fpct(ptxt)})` : ""}</td></tr>`);
+  }
+  $("netRows").innerHTML = rows.join("");
+  const head = REG.traceHead(D, traceKind);
+  $("headRatio").textContent = head
+    ? `cum ${traceKind === "nv" ? "netvar" : "Σz"} ${fn(head.ratio)} × band95 · n ${fint(head.n)}`
+    : `cum ${traceKind === "nv" ? "netvar" : "Σz"} — (n < ${D.band.n_min ?? 30})`;
+  // calibration card
+  const cal = [];
+  for (const e of order) {
+    const i = D.eggs[e];
+    cal.push(`<div class="kv"><span>${e}</span><b>μ ${fn(i.mu, 2)} · σ ${fn(i.sigma, 3)} · n ${fk(i.n_cal)}</b></div><div class="kv" style="margin-top:-1px"><span></span><span style="color:var(--ink-3)">${i.cal_source || "—"}</span></div>`);
+  }
+  $("calRows").innerHTML = cal.join("");
+  const excl = D.excluded || [];
+  $("calTag").textContent = excl.length ? excl.map(x => `${x.egg} excluded`).join(" · ") : (D.calibrated ? "" : "theoretical");
+  const b = D.band;
+  const bsrc = D.band_source || (mode === "live" ? "control bootstrap" : "default constants");
+  $("calBand").textContent = `band c95/c99 · Σz ${fn(b.c95_z)}/${fn(b.c99_z)} · netvar ${fn(b.c95_nv)}/${fn(b.c99_nv)} · sd_nv ${fn(b.sd_nv, 3)} · ${bsrc}`;
+  // sparkline: Stouffer Z_t over last 10 min
+  const Zs = D.series.Z.slice(-600);
+  const w = spark.width, h = spark.height;
+  sctx.clearRect(0, 0, w, h);
+  const Y = z => h / 2 - clamp(z, -4, 4) / 4 * (h / 2 - 1);
+  sctx.strokeStyle = "rgba(255,215,107,0.4)"; sctx.setLineDash([3, 3]); sctx.lineWidth = 1;
+  sctx.beginPath(); sctx.moveTo(0, Y(1.96)); sctx.lineTo(w, Y(1.96)); sctx.moveTo(0, Y(-1.96)); sctx.lineTo(w, Y(-1.96)); sctx.stroke();
+  sctx.setLineDash([]);
+  sctx.strokeStyle = "rgba(122,148,210,0.3)"; sctx.beginPath(); sctx.moveTo(0, h / 2); sctx.lineTo(w, h / 2); sctx.stroke();
+  sctx.strokeStyle = "#7aa7ff"; sctx.lineWidth = 1; sctx.beginPath(); let pen = false;
+  Zs.forEach((v, i) => {
+    if (!isNum(v)) { pen = false; return; }
+    const x = (600 - Zs.length + i) / 599 * w;
+    pen ? sctx.lineTo(x, Y(v)) : sctx.moveTo(x, Y(v)); pen = true;
+  });
+  sctx.stroke();
+  const lastZ = [...Zs].reverse().find(isNum);
+  $("sparkNow").textContent = `Z_t ${fz(lastZ)} · C ${E.C.toFixed(2)}`;
+  // clock + age
+  $("clock").textContent = (mode === "hist" ? "replay " : "") + fmtTime(D.now);
+  if (mode === "live") { const age = Date.now() / 1000 - (D.now || 0); $("age").textContent = `data age ${isNum(D.now) ? Math.round(age) + " s" : "—"}`; }
+  else if (mode === "hist") $("age").textContent = `${hist.idx + 1} / ${hist.len} s`;
+  else $("age").textContent = "simulation";
+}
+setInterval(() => { if (!paused) updateHUD(); }, 250);
+
+/* ============================================================================
+   SECTION 8 · CONTROLS, HELP, BOOT
+   ============================================================================ */
+setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
+simReset(); simTick();
+
+// when served by reg_bridge.py, prefer its own /api/state and go live
+if (location.protocol.startsWith("http")) {
+  fetch(location.origin + "/api/state?window=600", { cache: "no-store" })
+    .then(r => r.ok ? r.json() : null)
+    .then(s => { if (s && typeof s === "object" && s.series) { $("endpoint").value = location.origin + "/api/state"; setMode("live"); } })
+    .catch(() => {});
+}
+
+$("btnSim").onclick = () => setMode("sim");
+$("btnLive").onclick = () => setMode("live");
+$("btnHist").onclick = enterHistory;
+$("histHours").onchange = () => { if (mode === "hist") enterHistory(); };
+$("winSel").onchange = e => setWindow(+e.target.value);
+$("btnTrace").onclick = () => { traceKind = traceKind === "nv" ? "z" : "nv"; $("btnTrace").textContent = traceKind === "nv" ? "Trace: netvar" : "Trace: mean shift Σz"; };
+$("btnPlay").onclick = () => setPlaying(!hist.playing);
+$("btnSpeed").onclick = () => {
+  hist.speed = SPEEDS[(SPEEDS.indexOf(hist.speed) + 1) % SPEEDS.length];
+  $("btnSpeed").textContent = hist.speed + "×";
+  if (hist.playing) setPlaying(true);
+};
+$("tlScrub").addEventListener("input", e => seek(+e.target.value));
+$("injMean").onclick = () => inject("mean");
+$("injVar").onclick = () => inject("var");
+$("injCorr").onclick = () => inject("corr");
+$("injFault").onclick = () => inject("fault");
+$("btnCalm").onclick = calm;
+$("btnPause").onclick = () => { paused = !paused; $("btnPause").textContent = paused ? "Resume" : "Pause"; };
+$("btnHelp").onclick = () => $("help").classList.add("open");
+$("hudToggle").onclick = () => $("hud").classList.toggle("hidden");
+document.addEventListener("keydown", e => {
+  if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  if (e.key === "h" || e.key === "H") $("hud").classList.toggle("hidden");
+  if (e.key === "Escape") $("help").classList.remove("open");
+  if (e.key === " " && mode === "hist") { e.preventDefault(); setPlaying(!hist.playing); }
+});
+</script>
+</body>
+</html>

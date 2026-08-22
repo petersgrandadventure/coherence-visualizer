@@ -20,7 +20,7 @@ Region sums across the sensor are NOT independent (quadrant correlations up to
 -0.28: shared ISP gain/exposure), so the whole sensor is ONE egg.  Regions are
 also not interchangeable (a ceiling light or reflection gives saturated or
 fixed-pattern blocks), so the folded bits of each frame are emitted in a fixed
-seeded permutation of the block grid rather than row-major: every 200-bit
+a fresh seeded permutation of the block grid on every frame: every 200-bit
 trial the daemon forms then samples the whole sensor, the canonical trial is
 representative of the stream, and block-column parity is not locked to the
 daemon's alternating mask phase.
@@ -65,7 +65,7 @@ class CameraEgg(Egg):
         self._backend = None
         self._frame_shape = None          # (H, W) of the gray plane
         self._hb = self._wb = 0           # folded block grid
-        self._perm = None                 # fixed seeded emission order of the blocks
+        self._perm_rng = None             # seeded RNG drawing the block emission order per frame
         self._probe_idx = None            # fixed random pixel subset (flat indices)
         self._prev_probe = None
         self._frames_total = 0
@@ -150,7 +150,8 @@ class CameraEgg(Egg):
         h, w = shape
         self._frame_shape = (h, w)
         self._hb, self._wb = h // self.fold, w // self.fold
-        self._perm = np.random.default_rng(self.seed + 1).permutation(self._hb * self._wb)
+        self._nblk = self._hb * self._wb
+        self._perm_rng = np.random.default_rng(self.seed + 1)   # fresh block order every frame
         rng = np.random.default_rng(self.seed)
         n = min(self.n_probe, h * w)
         self._probe_idx = np.sort(rng.choice(h * w, size=n, replace=False))
@@ -167,7 +168,12 @@ class CameraEgg(Egg):
         k, hb, wb = self.fold, self._hb, self._wb
         blk = lsb[:hb * k, :wb * k].reshape(hb, k, wb, k)
         folded = np.bitwise_xor.reduce(blk, axis=(1, 3)).ravel()
-        self._push(folded[self._perm])                   # whole-sensor order, fixed for the run
+        # A fresh permutation per frame: each block's mask phase (set by its emission
+        # index) is then random frame to frame, and the canonical trial samples a
+        # different block subset every second. With a fixed order, the ISP's
+        # illumination-dependent spatial bias leaked through the alternating mask as
+        # an hour-scale trial-mean drift (measured: 100·phaseΔ ≈ ±0.1 per hour).
+        self._push(folded[self._perm_rng.permutation(self._nblk)])
         self._frames_total += 1
         self._first.set()
 
@@ -226,7 +232,7 @@ class CameraEgg(Egg):
             "device_index": self.index,
             "fold": self.fold,
             "bits_per_frame": self._hb * self._wb,
-            "block_order": "seeded permutation",
+            "block_order": "seeded permutation per frame",
             "thread_alive": bool(self._thread and self._thread.is_alive()),
         }
         if self._process_errors:

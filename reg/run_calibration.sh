@@ -27,7 +27,9 @@ fi
 
 HOURS="${1:-24}"
 mkdir -p ../data
-nohup "$PY" -u reg_calibrate.py --db "$DB" --hours "$HOURS" >> "$LOG" 2>&1 &
+# caffeinate -i keeps the Mac from idle-sleeping while the daemon runs (closing the
+# lid still sleeps it: leave the lid open for an uninterrupted calibration)
+nohup caffeinate -i "$PY" -u reg_calibrate.py --db "$DB" --hours "$HOURS" >> "$LOG" 2>&1 &
 sleep 3
 echo "calibration started (pid $!) for $HOURS h"
 echo "database: $DB"

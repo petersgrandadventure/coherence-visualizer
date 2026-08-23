@@ -124,6 +124,10 @@ def regime_consts(consts, egg, regime):
         c = consts.get(f"camera@{regime}")
         if c and c.get("source") == "empirical":
             return c
+        # never fall back to the pooled cross-regime entry: it mixes the dark-bias
+        # epoch and the fixed-order canonical bias into the constants
+        return c or {"mu": MU0, "sigma": SD0, "n": 0,
+                     "source": "theoretical (regime constants not yet calibrated)"}
     return consts.get(egg, {"mu": MU0, "sigma": SD0, "n": 0, "source": "theoretical"})
 
 

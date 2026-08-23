@@ -170,15 +170,19 @@ def load(conn):
     # them as separate pseudo-eggs. Regime = the flat-field signature, which is
     # robust to auto-exposure (a covered sensor reads mid-gray, not black).
     if "camera" in by:
-        def covered(r):
+        def cam_regime(r):
             h = json.loads(r[10]) if r[10] else {}
-            gs = h.get("gray_std")
-            return bool(h.get("lens_covered")) or (gs is not None and gs < 15.0)
-        cov_rows, unc_rows = [r for r in by["camera"] if covered(r)], [r for r in by["camera"] if not covered(r)]
-        if cov_rows and unc_rows:
+            gm, gs = h.get("gray_mean"), h.get("gray_std")
+            if gm is not None and gm < 8.0:
+                return "dark"          # ISP black-clamp: frozen LSB plane, mask-leaked mean bias
+            return "covered" if (bool(h.get("lens_covered")) or (gs is not None and gs < 15.0)) else "uncovered"
+        groups = {}
+        for r in by["camera"]:
+            groups.setdefault(cam_regime(r), []).append(r)
+        if len(groups) > 1:
             del eggs["camera"]
-            eggs["camera-covered"] = EggData("camera-covered", cov_rows)
-            eggs["camera-uncovered"] = EggData("camera-uncovered", unc_rows)
+            for k, v in groups.items():
+                eggs[f"camera-{k}"] = EggData(f"camera-{k}", v)
     cov_rows = conn.execute("SELECT ts, load1, clock_drift_ms, loop_late_ms FROM covariates ORDER BY ts").fetchall()
     cov = {k: np.array([np.nan if c[i] is None else c[i] for c in cov_rows], dtype=np.float64)
            for i, k in enumerate(("ts", "load1", "clock_drift_ms", "loop_late_ms"))}

@@ -50,6 +50,9 @@ WINDOWS = (60, 600, 3600)
 # the review's target is ≥ 100 000 (N/(k·n_cal) inflation < 1.03 for a 7200-s window).
 MIN_TRIALS = 50000
 CAMERA_COVERED_SQL = "(json_extract(health,'$.lens_covered')=1 OR json_extract(health,'$.gray_std')<15)"
+# below ~8 gray the ISP black-clamps the sensor: the LSB plane freezes (temporal r 0.997,
+# folded bias -0.06) and the mask leaks a ~+0.35 trial-mean systematic — never score it
+CAMERA_DARK_SQL = "(json_extract(health,'$.gray_mean') < 8)"
 
 
 # ---------------------------------------------------------------- constants
@@ -91,23 +94,33 @@ def constants(conn, before_ts=None, min_trials=MIN_TRIALS):
     for egg, *agg in conn.execute(f"SELECT egg, {cols} FROM seconds {where} GROUP BY egg", args):
         out[egg] = _pooled(*agg, min_trials)
     if "camera" in out:
-        for regime, cond in (("covered", CAMERA_COVERED_SQL), ("uncovered", f"NOT {CAMERA_COVERED_SQL}")):
+        # covered/uncovered constants come only from per-frame-permutation rows: the old
+        # fixed block order gave the canonical trial a biased fixed subset (DISAGREE gate)
+        perm = "json_extract(health,'$.block_order')='seeded permutation per frame'"
+        for regime, cond in (("covered", f"({CAMERA_COVERED_SQL} AND NOT {CAMERA_DARK_SQL} AND {perm})"),
+                             ("uncovered", f"(NOT {CAMERA_COVERED_SQL} AND NOT {CAMERA_DARK_SQL} AND {perm})"),
+                             ("dark", CAMERA_DARK_SQL)):
             w = (where + " AND " if where else "WHERE ") + f"egg='camera' AND {cond}"
             row = conn.execute(f"SELECT {cols} FROM seconds {w}", args).fetchone()
             out[f"camera@{regime}"] = _pooled(*row, min_trials)
+        out["camera@dark"]["source"] = "invalid (sensor black-clamped \u2014 use a translucent diffuser, not opaque tape)"   # never scorable, whatever its n
     return out
 
 
 def camera_regime(health):
     """'covered' | 'uncovered' from a health dict (report's rule: lens_covered or gray_std < 15)."""
     h = health or {}
-    gs = h.get("gray_std")
+    gm, gs = h.get("gray_mean"), h.get("gray_std")
+    if gm is not None and gm < 8:
+        return "dark"
     return "covered" if (h.get("lens_covered") is True or (gs is not None and gs < 15)) else "uncovered"
 
 
 def regime_consts(consts, egg, regime):
     """Constants in force for an egg: the camera uses its per-regime entry when that is empirical."""
     if egg == "camera" and regime:
+        if regime == "dark":
+            return {"mu": MU0, "sigma": SD0, "n": 0, "source": "invalid (sensor black-clamped \u2014 use a translucent diffuser, not opaque tape)"}
         c = consts.get(f"camera@{regime}")
         if c and c.get("source") == "empirical":
             return c
@@ -125,13 +138,13 @@ def series(conn, t0, t1, consts):
     eggs = sorted({r[0] for r in conn.execute("SELECT DISTINCT egg FROM seconds")})
     z = {e: np.full(n, np.nan) for e in eggs}
     last_health, last_ts, last_trial_ts, first_health, regime = {}, {}, {}, {}, {}
-    for egg, t, trial, health, covered in conn.execute(
-            f"SELECT egg, ts, trial_sum, health, {CAMERA_COVERED_SQL} FROM seconds "
+    for egg, t, trial, health, covered, dark in conn.execute(
+            f"SELECT egg, ts, trial_sum, health, {CAMERA_COVERED_SQL}, {CAMERA_DARK_SQL} FROM seconds "
             "WHERE ts BETWEEN ? AND ? ORDER BY ts", (t0, t1)):
         i = t - t0
-        rg = ("covered" if covered else "uncovered") if egg == "camera" else None
+        rg = ("dark" if dark else "covered" if covered else "uncovered") if egg == "camera" else None
         c = regime_consts(consts, egg, rg)
-        if trial is not None:
+        if trial is not None and not str(c.get("source", "")).startswith("invalid"):
             z[egg][i] = (trial - c["mu"]) / c["sigma"]
             last_trial_ts[egg] = t
         if egg not in first_health:

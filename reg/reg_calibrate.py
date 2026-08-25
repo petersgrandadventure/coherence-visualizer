@@ -25,7 +25,9 @@ covariates row with the lateness marks the gap.
 Robustness: one egg's exception cannot end the run (it is recorded in that
 row's health), SQLite write failures keep the rows pending and retry next
 second, an egg that delivers no bits for WATCHDOG_S seconds after having
-delivered is stopped and restarted (health carries `restarts`), and the eggs
+delivered is stopped and restarted (health carries `restarts`), an egg that
+was unavailable at start-up (e.g. a camera cold-open failure) is re-attempted
+every RETRY_S seconds and hot-joins the run, and the eggs
 and the database are always released on exit.
 
 Everything is written to SQLite so reg_report.py can derive calibration
@@ -53,6 +55,7 @@ TRIAL_BITS = 200
 SETTLE_S = 0.15          # wait after the second boundary so hardware buffers land
 RESYNC_MS = 1500         # lateness beyond which the window is discarded and the loop re-aligned
 WATCHDOG_S = 30          # seconds without bits (after having delivered) before an egg is restarted
+RETRY_S = 300            # an egg unavailable at start-up is re-attempted this often and hot-joins on success
 PENDING_MAX_S = 3600     # seconds of unwritten rows kept while the database is unavailable
 
 
@@ -143,40 +146,58 @@ def open_db(path):
 
 
 # ---------------------------------------------------------------- eggs
-def build_eggs(args):
-    eggs, notes = [], []
+def egg_factories(args):
+    factories = []
     if not args.no_mic:
-        try:
+        def mk_mic():
             from egg_mic import MicEgg
-            eggs.append(MicEgg(device_name=args.mic_device))
-        except Exception as e:
-            notes.append(f"mic: import/construct failed: {e!r}")
+            return MicEgg(device_name=args.mic_device)
+        factories.append(("mic", mk_mic))
     if not args.no_accel:
-        try:
+        def mk_accel():
             from egg_accel import AccelEgg
-            eggs.append(AccelEgg())
-        except Exception as e:
-            notes.append(f"accel: import/construct failed: {e!r}")
+            return AccelEgg()
+        factories.append(("accel", mk_accel))
     if not args.no_camera:
-        try:
+        def mk_camera():
             from egg_camera import CameraEgg
-            eggs.append(CameraEgg())
-        except Exception as e:
-            notes.append(f"camera: import/construct failed: {e!r}")
-    eggs.append(ControlEgg(bits_per_second=args.control_rate))
+            return CameraEgg()
+        factories.append(("camera", mk_camera))
+    factories.append(("control", lambda: ControlEgg(bits_per_second=args.control_rate)))
+    return factories
 
-    live = []
-    for egg in eggs:
-        try:
-            egg.start()
-        except Exception as e:
-            egg.available = False
-            egg.unavailable_reason = f"start() raised {e!r}"
-        if egg.available:
+
+def try_start(factory):
+    """(egg, None) on success, (None, reason) otherwise; a failed egg is released."""
+    try:
+        egg = factory()
+    except Exception as e:
+        return None, f"import/construct failed: {e!r}"
+    try:
+        egg.start()
+    except Exception as e:
+        egg.available = False
+        egg.unavailable_reason = f"start() raised {e!r}"
+    if egg.available:
+        return egg, None
+    reason = egg.unavailable_reason
+    try:
+        egg.stop()
+    except Exception:
+        pass
+    return None, reason
+
+
+def build_eggs(args):
+    live, notes, retry = [], [], []
+    for name, factory in egg_factories(args):
+        egg, reason = try_start(factory)
+        if egg:
             live.append(egg)
         else:
-            notes.append(f"{egg.name}: unavailable — {egg.unavailable_reason}")
-    return live, notes
+            notes.append(f"{name}: unavailable — {reason} (will retry every {RETRY_S} s)")
+            retry.append((name, factory))
+    return live, notes, retry
 
 
 # ---------------------------------------------------------------- main loop
@@ -190,7 +211,8 @@ class Daemon:
         self.run_id = uuid.uuid4().hex[:12]
         self.pending = []                      # [(sql, rows)] not yet committed
         self._db_failing = False
-        self.eggs, notes = build_eggs(args)
+        self.eggs, notes, self.retry = build_eggs(args)
+        self.last_retry = time.time()
         if self.stop_flag:                     # Ctrl-C during start-up
             self.shutdown()
             return
@@ -336,6 +358,7 @@ class Daemon:
                 self.pending.append((SQL_COV, [self._covariates(next_edge, late_ms)]))
                 next_edge = self._align()
                 continue
+            self._retry_eggs()
             rows = self.process_second(next_edge, late_ms)
             next_edge += 1
             n_done += 1
@@ -347,6 +370,32 @@ class Daemon:
                     self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                 except sqlite3.Error:
                     pass
+
+    def _retry_eggs(self):
+        """Re-attempt eggs that were unavailable at start-up; hot-join on success."""
+        if not self.retry or time.time() - self.last_retry < RETRY_S:
+            return
+        self.last_retry = time.time()
+        still = []
+        for name, factory in self.retry:
+            egg, reason = try_start(factory)
+            if egg is None:
+                still.append((name, factory))
+                continue
+            egg.take_bits()                        # drop the partial first window
+            self.eggs.append(egg)
+            self.mask_offset[egg.name] = 0
+            self.delivered[egg.name] = False
+            self.zero_run[egg.name] = 0
+            self.restarts.setdefault(egg.name, 0)
+            print(f"  {name}: joined the run after retry", flush=True)
+            try:
+                self.conn.execute("UPDATE runs SET notes = json_insert(notes, '$[#]', ?) WHERE run_id = ?",
+                                  (f"{name}: joined after retry at {int(time.time())}", self.run_id))
+                self.conn.commit()
+            except sqlite3.Error:
+                pass
+        self.retry = still
 
     def shutdown(self):
         if self.conn is None:

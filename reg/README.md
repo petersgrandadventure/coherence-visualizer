@@ -88,6 +88,13 @@ It also has a simulation mode (with injections showing what a mean shift,
 variance excess, correlated eggs or an instrument fault look like) and a
 history mode that replays any span of the database.
 
+The live field on real data, and a simulated excursion (correlated-eggs
+injection) for comparison — note the control ghost trace in both:
+
+![Live REG field on real data](../docs/field-live.png)
+
+![Simulated excursion, netvar z +8.8](../docs/field-excursion.png)
+
 ## Honest expectations
 
 The GCP's published effect is ~0.3σ per pre-registered event pooled over ~60

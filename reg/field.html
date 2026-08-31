@@ -1065,8 +1065,19 @@ setInterval(() => { if (!paused) updateHUD(); }, 250);
 setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
 simReset(); simTick();
 
+// deep link for sharing/captures: ?sim=corr|mean|var|fault starts SIMULATION with
+// that injection already four minutes in, so the developed state shows at once
+// (and the live auto-probe is skipped)
+const SIM_DEMO = new URLSearchParams(location.search).get("sim");
+if (SIM_DEMO && ["corr", "mean", "var", "fault"].includes(SIM_DEMO)) {
+  simReset();
+  sim.t0 -= 660;                       // back-fill 11 min of history…
+  sim.inj[SIM_DEMO] = { t0: 420 };     // …with the injection active since t=420
+  simTick();
+}
+
 // when served by reg_bridge.py, prefer its own /api/state and go live
-if (location.protocol.startsWith("http")) {
+if (!SIM_DEMO && location.protocol.startsWith("http")) {
   fetch(location.origin + "/api/state?window=600", { cache: "no-store" })
     .then(r => r.ok ? r.json() : null)
     .then(s => { if (s && typeof s === "object" && s.series) { $("endpoint").value = location.origin + "/api/state"; setMode("live"); } })

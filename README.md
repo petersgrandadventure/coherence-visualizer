@@ -1,82 +1,93 @@
 # Coherence Field
 
-A particle-field visualizer for [coherence_monitor](https://codeberg.org/TaoishTechy/coherence_monitor) —
-the state of the field is readable at a glance, the way the GCP Dot compresses
-network variance into a single color.
+An at-a-glance particle-field display for coherence in randomness — the way the
+GCP Dot compresses network variance into a single color, spatialized.
 
-**▶ [Live demo](https://petersgrandadventure.github.io/coherence-visualizer/)** —
-runs in simulation mode; try the **Coherence event** and **Pazuzu surge** buttons.
-(For live monitor data, run the bridge below and open `http://localhost:5005`
-instead — or paste your bridge's address into the demo's endpoint field.)
+The project has two generations. It began as a visualizer for
+[coherence_monitor](https://codeberg.org/TaoishTechy/coherence_monitor); a
+statistical review showed that monitor's Health metric is structurally constant
+(a step function of a matrix rank), so the project grew its own measurement
+layer: **a GCP-style random-event-generator network built from the Mac's
+physical noise sources, with calibrated statistics and a live control channel.**
+That instrument, in `reg/`, is the current heart of the project.
 
-Deep links jump straight to a state:
-[`?demo=coherence`](https://petersgrandadventure.github.io/coherence-visualizer/coherence_field.html?demo=coherence) ·
-[`?demo=pazuzu`](https://petersgrandadventure.github.io/coherence-visualizer/coherence_field.html?demo=pazuzu)
+## The REG instrument
 
-![A high-coherence event: Health 0.96, the field unified in gold, particles
-migrating from the continuum cloud to the boundary ring](docs/coherence-event.png)
+Three physical *eggs* — microphone ADC noise, the built-in accelerometer read
+at its native ~800 Hz through IOKit, and the camera sensor's LSB plane behind a
+translucent diffuser — each whitened to match its measured physics and formed
+into GCP-convention 200-bit trials every second, beside a `/dev/random` CSPRNG
+control run through byte-identical code. Every egg is scored against its own
+empirically calibrated mean and variance (estimated only from history older
+than the live window), the network is summarized by Stouffer Z and network
+variance, and every claim of "unusual" is made against a bootstrap null from
+the control egg. Full design, methodology, and honest-expectations notes:
+[reg/README.md](reg/README.md).
 
-## Quick start
+**Chance, honestly displayed** — the live instrument on real data. Each ring is
+an egg breathing with its current z; the grey outer ring is the CSPRNG control
+ghost; the outer annulus is the GCP cumulative-deviation plot bent into a
+circle with a bootstrap 95 % simultaneous band. Here the status chip is
+quantifying a mild ten-minute fluctuation (Stouffer Z +2.03, 95.7th percentile
+of the control's own history) — the kind chance produces routinely:
 
-Open `coherence_field.html` in any browser. It starts in **simulation mode** with a
-realistic packet generator; use the **Coherence event** / **Pazuzu surge** buttons to
-tour the states, and **How to read** for the full legend.
+![The live REG field: four labelled rings of particles, cumulative traces
+inside the translucent band, and an ATTENTION chip quantifying a mild
+fluctuation against the control](docs/field-live.png)
 
-## Live data
+**What a real signal would look like** — simulation mode with the "correlated
+eggs" injection (a shared component across the physical eggs, the signature
+network variance is built to detect). The families converge toward gold, the
+cumulative trace erupts past the dashed 99 % ring, and the control ghost stays
+home; the chip states the numbers that triggered EXCURSION:
 
-On the machine running the monitor:
+![Simulated excursion: the gold cumulative trace far outside the band while
+the control trace stays inside; netvar z +8.77](docs/field-excursion.png)
+
+Deep links tour the states:
+[`?sim=corr`](https://petersgrandadventure.github.io/coherence-visualizer/reg/field.html?sim=corr) ·
+[`?sim=mean`](https://petersgrandadventure.github.io/coherence-visualizer/reg/field.html?sim=mean) ·
+[`?sim=var`](https://petersgrandadventure.github.io/coherence-visualizer/reg/field.html?sim=var) ·
+[`?sim=fault`](https://petersgrandadventure.github.io/coherence-visualizer/reg/field.html?sim=fault)
+(the hosted page runs simulation mode; live mode needs the local bridge).
+
+### Running it
+
+From Terminal.app on a Mac (camera access is granted per launching app):
 
 ```bash
-python3 coherence_bridge.py            # from the folder containing coherence_ledger.db
+cd reg && ./run_calibration.sh 0        # acquisition daemon, runs until stopped
+../monitor/venv/bin/python reg_bridge.py &   # statistics bridge + field at http://localhost:5006
 ```
 
-Then open <http://localhost:5005> — the page loads already connected, polling
-`/api/latest` every 2 s (the monitor logs a packet every 4.2 s). Alternatively open
-the HTML file directly and press **Connect live**.
+`./report.sh` generates the full calibration report (constants, whiteness,
+stationarity, cross-egg structure, covariate coupling, Monte-Carlo bands) at
+any time. Requirements: numpy, opencv-python, pyaudio in a venv (see
+`monitor/`'s setup, or any venv — the daemon takes `--no-camera` etc. to run
+with whatever hardware is available).
 
-- Default port is **5005**, not 5000 — macOS AirPlay Receiver occupies 5000.
-- To watch from another machine: `python3 coherence_bridge.py --host 0.0.0.0`,
-  then point the endpoint field at `http://<monitor-ip>:5005/api/latest`.
-- `--db /path/to/coherence_ledger.db` if the bridge doesn't run beside the database.
+## v1 — visualizer for coherence_monitor
 
-The bridge is stdlib-only (no Flask required) and opens the database read-only, so
-it is safe to run alongside the monitor.
+The original single-file visualizer for the upstream monitor's ledger packets
+is still here and still fun:
+**▶ [Live demo](https://petersgrandadventure.github.io/coherence-visualizer/)**
+(simulation mode; try the **Coherence event** and **Pazuzu surge** buttons, or
+jump straight in:
+[`?demo=coherence`](https://petersgrandadventure.github.io/coherence-visualizer/coherence_field.html?demo=coherence) ·
+[`?demo=pazuzu`](https://petersgrandadventure.github.io/coherence-visualizer/coherence_field.html?demo=pazuzu)).
 
-## History playback
+![v1: a high-coherence event — the field unified in gold, particles migrating
+from the continuum cloud to the boundary ring](docs/coherence-event.png)
 
-The **History** button replays logged data through the field. With a bridge
-connected it pulls the last 1200 packets (~84 minutes) from `/api/recent?n=1200`;
-without one it replays whatever this page has seen during the current session.
-The timeline strip charts Health across the loaded span — gold dots are
-high-coherence events (Health > 0.9), red ticks are Pazuzu flags — so you can
-scrub directly to the moments that matter. Playback runs at 1× (real time,
-one packet per 4.2 s), 8×, or 30×.
-
-## Visual grammar
-
-| Signal | Encoding |
-|---|---|
-| Health / CI_C | Hue coherence: scattered cool blues → one unified gold band as Health passes 0.9; motion aligns from Brownian wander into shared orbital flow |
-| σ (noise) | Per-particle jitter amplitude |
-| ρ (spectral radius) | Rotation speed of the coherent flow |
-| CI_B spikes | Particles migrate from the central continuum cloud to the outer boundary ring (Axiom H₁₃ conservation, made visible) |
-| λmax/λMP > 1.15 | Particles lock onto a seven-pointed star — the heptagonal residue (Gate 7 / Marchenko–Pastur spike) |
-| λmax/λMP > 1.30 | Crimson turbulence — the Pazuzu abort state |
-| PSI < 0.3 | The structure disintegrates outward |
-| Gates 1–7 | Seven particle families; each family's brightness follows its gate's normalized ledger index (G1–G7 tiles in the HUD) |
-
-HUD: threshold ticks on each metric bar match the monitor's safety table
-(σ 0.053, ρ 0.95, r/dₛ 0.93, λ 1.15/1.30), plus a 3-minute Health sparkline and the
-latest payload hash. Press **H** to hide the panel for a pure field view.
-
-## REG calibration instrument (v2 direction)
-
-A review of the upstream monitor's algorithm showed its Health metric is
-structurally constant (a step function of a matrix rank), so the project now
-includes its own GCP-style random-event-generator instrument built from the
-Mac's physical noise sources — microphone ADC noise, the built-in accelerometer,
-and the camera sensor — with a CSPRNG control, per-egg empirical calibration,
-health tests, and covariate logging. See [reg/README.md](reg/README.md).
+Its grammar maps the monitor's schema directly: Health drives hue convergence
+(scattered cool blues → unified gold), σ drives jitter, ρ drives rotation,
+CI_B spikes migrate particles to the boundary ring, and a Marchenko–Pastur
+eigenvalue spike locks the field into a seven-pointed star. To run it against
+a real coherence_monitor ledger: `python3 coherence_bridge.py` beside
+`coherence_ledger.db`, then open <http://localhost:5005> (5005 because macOS
+AirPlay squats on 5000). The **History** button replays logged packets with a
+scrubbable timeline. Note the review in the project history before treating
+the upstream metrics as physically meaningful.
 
 ## License
 

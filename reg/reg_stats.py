@@ -50,9 +50,11 @@ WINDOWS = (60, 600, 3600)
 # the review's target is ≥ 100 000 (N/(k·n_cal) inflation < 1.03 for a 7200-s window).
 MIN_TRIALS = 50000
 CAMERA_COVERED_SQL = "(json_extract(health,'$.lens_covered')=1 OR json_extract(health,'$.gray_std')<15)"
-# below ~8 gray the ISP black-clamps the sensor: the LSB plane freezes (temporal r 0.997,
-# folded bias -0.06) and the mask leaks a ~+0.35 trial-mean systematic — never score it
-CAMERA_DARK_SQL = "(json_extract(health,'$.gray_mean') < 8)"
+# Below ~8 gray the ISP black-clamps the sensor (LSB plane frozen, folded bias -0.06,
+# mask-leaked +0.35 systematic). The damage starts earlier: between 8 and 30 gray the
+# 10-min Stouffer Z of the camera has sd 1.1-3.6 instead of 1.0 (minute-scale drift),
+# clean only from ~30 up (measured over 7 days). Never score below 30.
+CAMERA_DARK_SQL = "(json_extract(health,'$.gray_mean') < 30)"
 
 
 # ---------------------------------------------------------------- constants
@@ -103,7 +105,7 @@ def constants(conn, before_ts=None, min_trials=MIN_TRIALS):
             w = (where + " AND " if where else "WHERE ") + f"egg='camera' AND {cond}"
             row = conn.execute(f"SELECT {cols} FROM seconds {w}", args).fetchone()
             out[f"camera@{regime}"] = _pooled(*row, min_trials)
-        out["camera@dark"]["source"] = "invalid (sensor black-clamped \u2014 use a translucent diffuser, not opaque tape)"   # never scorable, whatever its n
+        out["camera@dark"]["source"] = "invalid (too dim: sensor near black clamp \u2014 add light or a lighter diffuser)"   # never scorable, whatever its n
     return out
 
 
@@ -111,7 +113,7 @@ def camera_regime(health):
     """'covered' | 'uncovered' from a health dict (report's rule: lens_covered or gray_std < 15)."""
     h = health or {}
     gm, gs = h.get("gray_mean"), h.get("gray_std")
-    if gm is not None and gm < 8:
+    if gm is not None and gm < 30:
         return "dark"
     return "covered" if (h.get("lens_covered") is True or (gs is not None and gs < 15)) else "uncovered"
 
@@ -120,7 +122,7 @@ def regime_consts(consts, egg, regime):
     """Constants in force for an egg: the camera uses its per-regime entry when that is empirical."""
     if egg == "camera" and regime:
         if regime == "dark":
-            return {"mu": MU0, "sigma": SD0, "n": 0, "source": "invalid (sensor black-clamped \u2014 use a translucent diffuser, not opaque tape)"}
+            return {"mu": MU0, "sigma": SD0, "n": 0, "source": "invalid (too dim: sensor near black clamp \u2014 add light or a lighter diffuser)"}
         c = consts.get(f"camera@{regime}")
         if c and c.get("source") == "empirical":
             return c

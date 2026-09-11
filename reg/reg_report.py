@@ -173,8 +173,8 @@ def load(conn):
         def cam_regime(r):
             h = json.loads(r[10]) if r[10] else {}
             gm, gs = h.get("gray_mean"), h.get("gray_std")
-            if gm is not None and gm < 8.0:
-                return "dark"          # ISP black-clamp: frozen LSB plane, mask-leaked mean bias
+            if gm is not None and gm < 30.0:
+                return "dark"          # ISP black-clamp region: drifting/frozen LSB plane below ~30 gray
             return "covered" if (bool(h.get("lens_covered")) or (gs is not None and gs < 15.0)) else "uncovered"
         groups = {}
         for r in by["camera"]:

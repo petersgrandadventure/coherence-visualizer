@@ -129,6 +129,40 @@ In the field, an open window shows as a gold arc on the outer ring with a
 countdown in the status chip, and the **Registered windows** card carries the
 running formal result.
 
+## The walk (PEAR-style intention sessions)
+
+The field carries a small ball on a thin ring — the descendant of PEAR's
+random-walk intention displays. Each second's network Stouffer Z is one step;
+the ball's angle is the cumulative Σz since the session opened. Intention
+**HI** means clockwise; **LO** mirrors the ring so clockwise is still toward
+the intention; **BL** is PEAR's baseline — intend nothing, and the ball should
+stay near the top. The ring is calibrated to the evaluation rather than to a
+feeling: small ticks mark the 5 % line for the session's length
+(1.645·√N one-sided), and **one full lap is the 1 % line** (2.326·√N), so
+pushing the ball all the way around means precisely "this session ends as a
+p < 0.01 result." Gold shows only while the ball is currently past the 5 %
+line, never latched; the only position that counts is where the ball sits
+when the window closes.
+
+A walk *is* a pre-registered window: **Start walk** (click, then confirm —
+the registration is permanent) declares the intention and duration, a 60 s
+settle follows, the window opens, and 30–90 s after it closes the bridge
+evaluates it and the ring label switches to the ledger's numbers. During the
+window the bridge scores it with the evaluator's own recipe, so the ball and
+the ledger cannot disagree. Sessions in simulation mode are local and
+unregistered — every label says `SIM`, the ring is dashed, and the mean-shift
+injection is literally a successful HI intention, so you can see what one
+looks like. A striking walk is not evidence; the evaluation is.
+
+## Zen view
+
+Press **Z** (or the **Zen** button) and everything but the field disappears —
+rings, ball, and the outer trace only. **Z** or the dim ◌ in the corner brings
+the interface back; `?zen=1` bookmarks the rings-only view for a wall display.
+One honest exception: a small crimson dot appears if the instrument itself is
+in trouble (stale or excluded data), so still rings are never mistaken for
+calm ones.
+
 ## Honest expectations
 
 The GCP's published effect is ~0.3σ per pre-registered event pooled over ~60

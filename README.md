@@ -51,6 +51,13 @@ Deep links tour the states:
 [`?sim=fault`](https://petersgrandadventure.github.io/coherence-visualizer/reg/field.html?sim=fault)
 (the hosted page runs simulation mode; live mode needs the local bridge).
 
+It also carries the experiment: **pre-registered windows** (declare start,
+duration, statistic and hypothesised direction before the window opens; the
+bridge evaluates it automatically afterwards and the ledger has no file
+drawer) and **the walk** — a PEAR-style intention ball whose full lap is the
+session's 1 % line — plus a **zen view** (press Z) that leaves nothing but the
+rings. Details in [reg/README.md](reg/README.md).
+
 ### Running it
 
 From Terminal.app on a Mac (camera access is granted per launching app):

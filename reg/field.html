@@ -85,12 +85,17 @@
   button:hover { background: rgba(122,148,210,.22); }
   button:disabled { opacity: .35; cursor: default; }
   button.active { background: rgba(122,167,255,.25); border-color: rgba(122,167,255,.5); }
-  button.inj.on { background: rgba(255,215,107,.2); border-color: rgba(255,215,107,.5); }
+  button.inj.on, #btnWalk.on { background: rgba(255,215,107,.2); border-color: rgba(255,215,107,.5); }
   #endpoint { font: 11px var(--mono); color: var(--ink); background: rgba(0,0,0,.3); border: 1px solid rgba(122,148,210,.2); border-radius: 7px; padding: 7px 9px; width: 212px; }
   #liveState { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); }
   #liveState.ok { color: var(--good); }
   #liveState.bad { color: var(--crit); }
   .sep { width: 1px; height: 20px; background: rgba(122,148,210,.2); }
+  /* walk group (bottom dock) */
+  #walkGroup { display: inline-flex; align-items: center; gap: 6px; }
+  #walkGroup .glbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-2); }
+  #walkMsg { font: 10.5px var(--mono); color: var(--ink-3); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #walkMsg.bad { color: var(--crit); }
 
   /* ---------- history timeline ---------- */
   #timeline { width: min(820px, calc(100vw - 24px)); display: none; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 12px; padding: 8px 10px; backdrop-filter: blur(10px); }
@@ -120,6 +125,15 @@
   #help .note { border-left: 2px solid var(--gold); padding-left: 12px; margin-top: 14px; }
 
   #hudToggle { position: fixed; top: 14px; left: 14px; z-index: 9; }
+  /* zen view: nothing but the field (Z toggles; ?zen=1 bookmarks it) */
+  body.zen #hud, body.zen #dock, body.zen #hudToggle, body.zen #help { display: none !important; }
+  #zenBtn { position: fixed; right: 14px; bottom: 14px; z-index: 11; opacity: .22; transition: opacity .3s; font-size: 15px; padding: 5px 10px; }
+  #zenBtn:hover { opacity: .9; }
+  body:not(.zen) #zenBtn { display: none; }
+  #zenHint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 11; font: 11px var(--mono); color: var(--ink-3); opacity: 0; transition: opacity .6s; pointer-events: none; }
+  body.zen #zenHint.show { opacity: .75; }
+  #zenFault { position: fixed; left: 14px; bottom: 14px; z-index: 11; width: 8px; height: 8px; border-radius: 50%; background: var(--crit); box-shadow: 0 0 8px var(--crit); display: none; }
+  body.zen #zenFault.on { display: block; }
   @media (max-width: 700px) { #hud { width: calc(100vw - 28px); } #endpoint { width: 130px; } }
 </style>
 </head>
@@ -127,6 +141,9 @@
 <canvas id="field"></canvas>
 
 <button id="hudToggle" title="Toggle panel (H)">☰</button>
+<button id="zenBtn" title="Leave zen view (Z)">◌</button>
+<div id="zenHint">rings only · press Z or click ◌ to return</div>
+<div id="zenFault" title="instrument problem (stale or excluded data) — press Z to see the status"></div>
 
 <div id="hud">
   <h1>Coherence Field <span>· REG instrument</span></h1>
@@ -143,6 +160,7 @@
   <div class="card" id="regCard" style="display:none">
     <h2>Registered windows <span class="tag" id="regTag" style="color:var(--ink-3)"></span></h2>
     <div class="sub" id="regOpen" style="white-space:normal">—</div>
+    <div class="sub" id="regWalk" style="white-space:normal;color:var(--ink-2);display:none"></div>
     <div class="sub" id="regFormal" style="white-space:normal">—</div>
     <div class="sub" id="regLast" style="white-space:normal"></div>
   </div>
@@ -178,7 +196,16 @@
   <button id="btnTrace" title="Outer ring trace">Trace: netvar</button>
   <span id="liveState"></span>
   <div class="sep"></div>
-  <button class="inj" id="injMean" title="Add +0.3 to every physical egg's z for 5 min">Mean shift +0.3σ</button>
+  <span id="walkGroup">
+    <span class="glbl">Walk</span>
+    <select id="walkMin" title="Walk session length"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="20">20 min</option></select>
+    <select id="walkDir" title="Intention: HI = Σz up (one-sided, clockwise), LO = Σz down (one-sided; ring mirrored so clockwise = toward LO), BL = baseline — intend nothing (two-sided; the ball should stay near 12 o'clock)"><option value="HI" selected>HI</option><option value="LO">LO</option><option value="BL">BL</option></select>
+    <button id="btnWalk" title="Registers a walk window in the ledger (Σz, 60 s settle). A registered window cannot be cancelled — ledger integrity. Click twice: the second click confirms.">Start walk</button>
+    <button id="btnWalkStop" title="Stop the simulated walk (simulation only)" disabled>Stop sim walk</button>
+    <span id="walkMsg"></span>
+  </span>
+  <div class="sep"></div>
+  <button class="inj" id="injMean" title="Add +0.3 to every physical egg's z for 5 min — this is literally what a successful HI intention would look like; run it during a SIM walk to see the ball climb. Nothing in the simulation is data.">Mean shift +0.3σ</button>
   <button class="inj" id="injVar" title="Multiply physical z by √1.3 for 5 min">Variance ×1.3</button>
   <button class="inj" id="injCorr" title="Add one shared N(0, 0.6) draw per second to all physical eggs for 5 min">Correlated eggs</button>
   <button class="inj" id="injFault" title="Mark one egg stale for 5 min">Instrument fault</button>
@@ -186,6 +213,7 @@
   <div class="sep"></div>
   <button id="btnPause">Pause</button>
   <button id="btnHelp">How to read</button>
+  <button id="btnZen" title="Rings only (Z)">Zen</button>
 </div>
 </div>
 
@@ -222,7 +250,12 @@
     </ul>
 
     <h3>Modes</h3>
-    <p><b>Live</b> polls <code>reg_bridge.py</code> (<code>/api/state?window=W</code>) every 2 s; tail probabilities are empirical — the fraction of independent windows, bootstrapped from the control egg's own z-history, at least as extreme (never reported as 0; floored at one over the null's size). Only eggs with empirical constants that agree with their canonical trial are scored; the rest are listed as excluded. <b>Simulation</b> runs synthetic Binomial(200, ½) eggs with injectable effects (each lasts 5 min): a mean shift, a variance inflation, correlated eggs (what network variance is built to detect), and an instrument fault; p-values there are analytic. <b>History</b> replays the bridge's per-second record; scrubbing sets <em>now</em> and everything is recomputed from the z arrays up to that moment. Gold ticks in the strip mark where the 10-minute |Stouffer Z| exceeded 1.96.</p>
+    <p><b>Live</b> polls <code>reg_bridge.py</code> (<code>/api/state?window=W</code>) every 2 s; tail probabilities are empirical — the fraction of independent windows, bootstrapped from the control egg's own z-history, at least as extreme (never reported as 0; floored at one over the null's size). Only eggs with empirical constants that agree with their canonical trial are scored; the rest are listed as excluded. <b>Simulation</b> runs synthetic Binomial(200, ½) eggs with injectable effects (each lasts 5 min): a mean shift, a variance inflation, correlated eggs (what network variance is built to detect), and an instrument fault; p-values there are analytic. The mean-shift injection is literally intention — +0.3σ on every physical egg's z, every second, i.e. a HI effect for the walk below. <b>History</b> replays the bridge's per-second record; scrubbing sets <em>now</em> and everything is recomputed from the z arrays up to that moment. Gold ticks in the strip mark where the 10-minute |Stouffer Z| exceeded 1.96.</p>
+
+    <h3>The walk</h3>
+    <p>PEAR's random-walk experiments moved a marker with the REG's cumulative deviation while the operator intended <em>HI</em>, <em>LO</em> or <em>BL</em> (baseline). Here a step is one second's network Stouffer Z<sub>t</sub> (Σz over the eggs scored that second, divided by √k); under chance every step has mean 0 and variance 1 whatever k is, so S = Σ steps is a fair random walk. More eggs scored means a bigger expected step if there is an effect — never a biased one if there is not. The ball on the thin ring at 0.72 R winds clockwise with S over the session: <em>HI</em> is a one-sided registration for Σz up; <em>LO</em> is one-sided for Σz down and the ring is mirrored so that clockwise is toward LO (the labels always print the raw signed Σz); <em>BL</em> is PEAR's baseline — you intend <em>nothing</em>, the window is registered two-sided, and the ball should stay near 12 o'clock. A baseline walk is your own control: a baseline that ends gold is as informative about the instrument as a HI walk that ends gold.</p>
+    <p>The lap scale is the <strong>ledger's own end-of-window scale</strong>: one lap means a final Stouffer Z (Σz/√n) of 2.33 (2.58 for BL, two-sided) — the ledger's 1 % line at the session's length; the gold ticks are its 5 % line, ±1.645·√n (±1.96·√n for BL). Both refer to where the ball <em>ends</em>; touching a mark mid-walk is not a result, and the arc is gold only while the ball is <em>currently</em> past the 5 % line in the intended direction (either direction for BL) — never latched. The ball keeps winding past one lap; the label carries the lap count and a running Z "so far" that is not a result until the window closes.</p>
+    <p>A walk session is a <strong>registered window</strong>. In LIVE, <em>Start walk</em> (click, then confirm) writes a pre-registration to the ledger (statistic Σz, the chosen direction, a 60 s settle before it opens); it cannot be cancelled, because a window you could withdraw after seeing the data would not be a pre-registration, and the bridge refuses a window that overlaps one already registered. Choosing the moment to press Start while watching the trace is harmless: the steps are independent (serial correlation below 10<sup>−3</sup>), S starts at zero when the window opens and nothing before it counts — which is why the sum never includes the settle. Between 30 and 90 s after it closes the bridge evaluates it — constants from before the window, a tail probability from a bootstrap of the control egg's own history at that length — and the ring label then switches to the ledger's numbers (Z, sidedness, p vs control, n), which are the only ones that count. While the window is open the bridge scores it with the evaluator's own recipe and the ball shows those numbers; a window registered from the command line is shown the same way. In SIMULATION the session is local and unregistered: every label is prefixed <code>SIM</code> and the ring is dashed; run <em>Mean shift +0.3σ</em> during a SIM walk to see what a successful HI walk looks like — nothing in the simulation is data. A striking walk is not evidence; the evaluation is.</p>
 
     <p class="note">An honest note: the GCP's published effect is ~0.3σ per pre-registered event, pooled across ~60 devices. A three-egg home instrument cannot detect an effect that size. This page's job is narrower and more useful: to show, against a defined null and with the control drawn beside it, whether this field ever departs from chance — and to say so in numbers.</p>
   </div>
@@ -256,6 +289,15 @@
    GET /api/history?hours=H  →  { t0, step:1, physical:[…], excluded:[…],
                                   constants:{egg:{mu, sigma, n, source}}, band,
                                   before_ts, z:{egg:[…]}, Z:[…] }
+   GET /api/registrations       →  { now, registrations:[{id, start, end, label, statistic,
+                                  direction, post_hoc, status, result?:{status, primary_value,
+                                  p_control, stouffer_Z, n_seconds, …},
+                                  walk?:{sum_z, n_present, n_total, Z_so_far, k, physical}
+                                  (unevaluated items; the evaluator's own recipe)}],
+                                  formal:{N, combined_Z, …} }
+   POST /api/register {minutes, statistic, direction, label, lead_s}  →  the record (200)
+                                  or {error} (400 validation, 403 other origin, 409 overlap)
+                                  — used by the walk's "Start walk"; same-origin only
 
    All three modes feed ONE derived state object `D` (see deriveFromZ /
    stateFromServer) that the particle engine, outer ring and HUD consume:
@@ -498,7 +540,7 @@ const hueToGold = (hue, C) => lerp(hue, GOLD_HUE, C);
 const live = { timer: null, fails: 0, restarts0: {}, restartsChanged: "", lastOk: 0 };
 function liveUrl() {
   const base = $("endpoint").value.trim().replace(/[?#].*$/, "");
-  return `${base}?window=${displayWindow}`;
+  return `${base}?window=${walkLiveWindow()}`;       // = displayWindow unless a walk session needs more
 }
 async function pollLive() {
   if (paused) return;                               // Pause freezes the display AND the polling
@@ -510,6 +552,7 @@ async function pollLive() {
     if (gen !== modeGen) return;                    // mode changed while the fetch was pending
     if (!s || typeof s !== "object" || !s.series) throw new Error("no series");
     D = REG.stateFromServer(s);
+    walkCutSeries(D, s);                            // a walk's wider request never re-anchors the ring/HUD
     live.fails = 0; live.lastOk = performance.now();
     for (const [e, info] of Object.entries(D.eggs)) {
       if (!(e in live.restarts0)) live.restarts0[e] = info.restarts;
@@ -583,14 +626,23 @@ function inject(key) { if (mode !== "sim") return; sim.inj[key] = { t0: sim.n };
 function calm() { sim.inj = {}; sim.faultEgg = null; simTick(); }
 
 /* ---------------- REGISTRATIONS (pre-registered windows, live mode) ---------------- */
-const regs = { items: [], formal: null, timer: null };
+const regs = { items: [], formal: null, timer: null, seenAt: {}, lastPoll: 0, inflight: false };
 async function pollRegs() {
-  if (mode !== "live") return;
+  if (mode !== "live" || regs.inflight) return;
+  regs.lastPoll = performance.now(); regs.inflight = true;
+  const gen = modeGen;
   try {
     const r = await fetch(historyOrigin() + "/api/registrations", { cache: "no-store" });
-    if (r.ok) { const j = await r.json(); regs.items = j.registrations || []; regs.formal = j.formal || null; }
+    if (r.ok) {
+      const j = await r.json();
+      if (gen !== modeGen) return;
+      regs.items = j.registrations || []; regs.formal = j.formal || null;
+      const nowS = Math.floor(Date.now() / 1000);
+      for (const it of regs.items) if (it.result && !(it.id in regs.seenAt)) regs.seenAt[it.id] = nowS;   // when a result was first seen
+    }
   } catch (e) {}
-  renderRegs();
+  finally { regs.inflight = false; }
+  if (gen === modeGen) renderRegs();
 }
 function regOpen(nowS) { return regs.items.find(r => nowS >= r.start && nowS < r.end) || null; }
 function fmtLeft(s) { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
@@ -634,6 +686,272 @@ function drawRegArcs() {
       ctx.beginPath(); ctx.arc(CX, CY, rc + hw * k99, theta(i0), theta(i1)); ctx.arc(CX, CY, rc - hw * k99, theta(i1), theta(i0), true); ctx.fill();
     }
   }
+}
+
+/* ============================================================================
+   SECTION 3b · THE WALK — PEAR-style random-walk display of a registered window
+   A thin ring at WALK_RING·R. The session is a registered window (LIVE: one
+   pending/open/just-ended item of regs.items — open beats pending beats ended,
+   then earliest end; SIM: a local session from the controls; HISTORY: none).
+   The ball's angle is
+     θ = −π/2 + 2π · (dirSign · S) / L,   S = Σ network Stouffer Z_t so far,
+     L = z_1% · √n_total — the LEDGER's end-of-window 1 % line at the session's
+     length (2.326 one-sided for HI/LO, 2.576 two-sided for BL); the ticks are
+     its 5 % line (1.645 / 1.960). dirSign = −1 for LO (mirror) so clockwise is
+     toward the intention; BL (baseline: intend nothing) is unmirrored.
+   LIVE numbers come from the bridge's `walk` object (the evaluator's own
+   recipe); the live series is only a fallback. When the ledger's result
+   arrives the ball is re-anchored to it. It displays the numbers the ledger
+   evaluates — nothing more.
+   ============================================================================ */
+const WALK_RING = 0.72, WALK_SETTLE = 60, WALK_MAX_WINDOW = 7200;
+const WALK_AFTERGLOW_MAX = 300;     // s after the end the session stays on the ring without a result
+const WALK_RESULT_HOLD = 90;        // s the ledger's result stays on the ring after it was first seen
+const WALK_HORIZON = 900;           // a pending window becomes the session only this close to its start
+const WALK_CONFIRM_MS = 8000;       // the second click must come within this
+const WALK_Z = { one: { lap: 2.326, tick: 1.645 }, two: { lap: 2.576, tick: 1.960 } };   // analytic quantiles = the ledger's p lines
+const WALK_DIRS = { HI: { direction: "up", sign: 1 }, LO: { direction: "down", sign: -1 }, BL: { direction: "two-sided", sign: 1 } };
+const walkKey = direction => direction === "down" ? "LO" : direction === "two-sided" ? "BL" : "HI";
+const walk = { sim: null, posting: false, confirmUntil: 0 };   // sim: {start, end, direction, label, statistic} in wall-clock seconds (sim.t0 + index)
+
+// "now" for the walk: the sim's own clock (freezes with Pause), wall clock in LIVE
+function walkNow() { return mode === "sim" ? (D && isNum(D.now) ? D.now : sim.t0 + sim.n - 1) : Math.floor(Date.now() / 1000); }
+
+// a registered item is on the ring until this second
+function walkActiveUntil(r) {
+  const glow = r.end + WALK_AFTERGLOW_MAX;
+  return r.result && isNum(regs.seenAt[r.id]) ? Math.min(glow, regs.seenAt[r.id] + WALK_RESULT_HOLD) : glow;
+}
+
+// the one active session, or null: open (0) beats pending (1) beats ended (2), then the earliest end
+function walkSession(nowS) {
+  if (mode === "live") {
+    let best = null, bestRank = 9;
+    for (const r of regs.items) {
+      if (!isNum(r.start) || !isNum(r.end) || nowS >= walkActiveUntil(r)) continue;
+      if (nowS < r.start - WALK_HORIZON) continue;                 // a far-future CLI window stays in the card only
+      const rank = nowS < r.start ? 1 : nowS < r.end ? 0 : 2;
+      if (!best || rank < bestRank || (rank === bestRank && r.end < best.end)) { best = r; bestRank = rank; }
+    }
+    return best ? { start: best.start, end: best.end, direction: best.direction, statistic: best.statistic, label: best.label, reg: best, source: "live" } : null;
+  }
+  if (mode === "sim" && walk.sim && nowS < walk.sim.end + WALK_AFTERGLOW_MAX) return Object.assign({ source: "sim" }, walk.sim);
+  return null;
+}
+
+// live window request: the whole session must be in the series (fallback data) from 120 s before
+// it opens until it leaves the ring; the display window itself is untouched (see walkCutSeries)
+function walkLiveWindow() {
+  const nowS = Math.floor(Date.now() / 1000);
+  const s = mode === "live" ? walkSession(nowS) : null;
+  if (!s || nowS < s.start - 120) return displayWindow;
+  return Math.min(WALK_MAX_WINDOW, Math.max(displayWindow, s.end - s.start + 120));
+}
+// keep the ring, HUD and status chip on the user's display window: park the wider series for the
+// walk and rebuild D.series from its last displayWindow seconds
+function walkCutSeries(d, raw) {
+  d.walkSeries = null;
+  if (!d || !d.series || !isNum(d.now) || !(d.series.len > displayWindow)) return;
+  const Z = d.series.Z, ser = (raw && raw.series) || {};
+  d.walkSeries = { Z, t0: d.now - d.series.len + 1 };
+  const cutZ = Z.slice(-displayWindow), net = REG.cumulative(cutZ);
+  const rawCtrl = Array.isArray(ser.z && ser.z[CONTROL]) ? ser.z[CONTROL].slice(-displayWindow).map(v => isNum(v) ? v : null) : [];
+  const ctrl = REG.cumulative(rawCtrl);
+  d.series = { len: cutZ.length, Z: cutZ, net_cum_z: net.cz, net_cum_nv: net.cnv, net_n: net.n,
+               ctrl_cum_z: ctrl.cz, ctrl_cum_nv: ctrl.cnv, ctrl_n: ctrl.n };
+  d.window = displayWindow;
+}
+
+// S = Σ Z_t over the session's seconds so far (nulls skipped); n = seconds summed; k = eggs scored
+// in the last second; recipe = where the numbers came from; covered = false when the fallback
+// series does not reach back to the session start
+function walkSum(s, nowS) {
+  let S = 0, n = 0, covered = true, k = null, recipe = "live series";
+  const tEnd = Math.min(s.end, nowS + 1);
+  if (s.source === "live") {
+    const w = s.reg && s.reg.walk;
+    if (w && isNum(w.sum_z) && isNum(w.n_present)) {          // the bridge scored it the way the ledger will
+      return { S: w.sum_z, n: w.n_present, covered: true, k: isNum(w.k) ? w.k : null, recipe: "evaluator" };
+    }
+    if (!D || !isNum(D.now)) return { S, n, covered: false, k, recipe };
+    const src = D.walkSeries || (D.series ? { Z: D.series.Z, t0: D.now - D.series.len + 1 } : null);
+    if (!src) return { S, n, covered: false, k, recipe };
+    covered = src.t0 <= s.start;
+    for (let t = Math.max(s.start, src.t0); t < tEnd; t++) { const v = src.Z[t - src.t0]; if (isNum(v)) { S += v; n++; } }
+    k = D.physical ? D.physical.length : null;
+  } else {
+    const i0 = Math.max(0, s.start - sim.t0), i1 = Math.min(sim.n, tEnd - sim.t0);
+    covered = s.start >= sim.t0;
+    recipe = "sim";
+    if (i1 > i0) {
+      for (const v of REG.stouffer(sim.zs, SIM_PHYS, i0, i1)) if (isNum(v)) { S += v; n++; }
+      k = SIM_PHYS.filter(e => isNum(sim.zs[e][i1 - 1])).length;
+    }
+  }
+  return { S, n, covered, k, recipe };
+}
+
+const walkSided = direction => direction === "two-sided" ? "two-sided" : "one-sided " + direction;
+
+// everything the ring, the label, the card line and the controls need, or null when no session
+function walkState() {
+  if (mode === "hist") return null;
+  const nowS = walkNow();
+  const s = walkSession(nowS); if (!s) return null;
+  const phase = nowS < s.start ? "pending" : nowS < s.end ? "open" : "after";
+  const key = walkKey(s.direction), sign = WALK_DIRS[key].sign, zq = key === "BL" ? WALK_Z.two : WALK_Z.one;
+  const len = Math.max(1, s.end - s.start), L = zq.lap * Math.sqrt(len), L95 = zq.tick * Math.sqrt(len);
+  const res = s.reg && s.reg.result ? s.reg.result : null;
+  let { S, n, covered, k, recipe } = phase === "pending" ? { S: 0, n: 0, covered: true, k: null, recipe: "none" } : walkSum(s, nowS);
+  if (res && res.status === "evaluated" && isNum(res.stouffer_Z) && isNum(res.n_seconds) && res.n_seconds > 0) {
+    S = res.stouffer_Z * Math.sqrt(res.n_seconds); n = res.n_seconds; covered = true; recipe = "ledger";   // the final ball IS the ledger's number
+  }
+  const signed = sign * S;
+  const theta = -Math.PI / 2 + TAU * signed / L;
+  const laps = Math.abs(S) / L;
+  const gold = phase !== "pending" && (key === "BL" ? Math.abs(S) >= L95 : signed >= L95);   // current position only — never latched
+  const Zw = n >= 1 ? S / Math.sqrt(n) : null;
+  const pre = s.source === "sim" ? "SIM " : "";
+  const partial = covered ? "" : " · partial";
+  const src = s.source === "live" && recipe === "live series" ? " · live series" : "";
+  const lapTxt = `${laps.toFixed(2)} lap${key === "LO" ? " toward LO" : ""}`;
+  const kTxt = isNum(k) ? ` · k ${k}` : "";
+  let label;
+  if (phase === "pending")
+    label = s.source === "live"
+      ? `walk · ${key} · registered ${s.reg && s.reg.id ? String(s.reg.id).slice(0, 6) : "—"} · opens in ${fmtLeft(s.start - nowS)}`
+      : `SIM walk · ${key} · opens in ${fmtLeft(s.start - nowS)}`;
+  else if (phase === "open")
+    label = `${pre}walk · ${key} · Σz ${fz(S, 1)} · Z so far ${fz(Zw)} · ${lapTxt}${kTxt} · ${fmtLeft(s.end - nowS)} left` +
+            `${key === "BL" && gold ? " · beyond 5 % two-sided — baseline moved" : ""}${partial}${src}`;
+  else if (s.source === "sim")
+    label = `SIM walk ended · Σz ${fz(S, 1)} · ${lapTxt} · not registered · not evaluated${partial}`;
+  else if (res && res.status === "evaluated") {
+    const post = s.reg.post_hoc ? "POST HOC · not in formal series · " : "";
+    const nTxt = `n ${isNum(res.n_seconds) ? res.n_seconds : "—"}/${len}`;
+    label = s.statistic === "netvar"
+      ? `${post}ledger · netvar z ${fz(res.primary_value)} · p ${fp(res.p_control)} ${walkSided(s.direction)} vs control · ${nTxt}` +
+        ` (walk showed Σz, not the declared statistic; Stouffer Z ${fz(res.stouffer_Z)})`
+      : `${post}ledger · Stouffer Z ${fz(res.primary_value)} · p ${fp(res.p_control)} ${walkSided(s.direction)} vs control · ${nTxt}`;
+  }
+  else if (res && res.status === "no data") label = `ledger · no data (n < 30 or no calibrated egg)`;
+  else if (res) label = `ledger · evaluation error — see bridge log`;
+  else label = `walk closed · Σz ${fz(S, 1)} · ${lapTxt} · ledger evaluating…${partial}${src}`;
+  return { s, nowS, phase, key, sign, S, n, k, recipe, len, signed, L, L95, f95: L95 / L, theta, laps, gold, Zw, label, res };
+}
+
+function drawWalkRing() {
+  const w = walkState(); if (!w) return;
+  const rw = R * WALK_RING, a0 = -Math.PI / 2, isSim = w.s.source === "sim";
+  ctx.save();
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(220,228,245,0.10)";
+  if (isSim) ctx.setLineDash([3, 5]);                          // a simulated walk can never pass for a registered one
+  ctx.beginPath(); ctx.arc(CX, CY, rw, 0, TAU); ctx.stroke();
+  ctx.setLineDash([]);
+  const tick = (ang, len, col) => {
+    ctx.strokeStyle = col; ctx.beginPath();
+    ctx.moveTo(CX + Math.cos(ang) * (rw - len), CY + Math.sin(ang) * (rw - len));
+    ctx.lineTo(CX + Math.cos(ang) * (rw + len), CY + Math.sin(ang) * (rw + len)); ctx.stroke();
+  };
+  tick(a0, 6, "rgba(220,228,245,0.45)");                     // start · one lap = the ledger's 1 % end-of-window line
+  tick(a0 + TAU * w.f95, 4, "rgba(255,215,107,0.45)");       // +5 % line
+  tick(a0 - TAU * w.f95, 4, "rgba(255,215,107,0.45)");       // −5 % line
+  // progress arc from 12 o'clock to the ball along the travelled direction (full circle beyond a lap)
+  if (w.phase !== "pending" && w.signed !== 0) {
+    ctx.lineWidth = 2; ctx.strokeStyle = w.gold ? "rgba(255,215,107,0.8)" : "rgba(220,228,245,0.35)";
+    if (isSim) ctx.setLineDash([3, 5]);
+    ctx.beginPath(); ctx.arc(CX, CY, rw, a0, w.theta, w.signed < 0); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // the ball: 5 px disc, 12 px soft glow, #dce4f5 → #ffd76b by min(1, |S|/L); dim at 12 o'clock while pending
+  const th = w.phase === "pending" ? a0 : w.theta;
+  const bx = CX + Math.cos(th) * rw, by = CY + Math.sin(th) * rw;
+  const k = Math.min(1, Math.abs(w.S) / w.L), dim = w.phase === "pending" ? 0.35 : 1, glow = isSim ? 0.22 : 0.45;
+  const col = `${Math.round(lerp(220, 255, k))},${Math.round(lerp(228, 215, k))},${Math.round(lerp(245, 107, k))}`;
+  const g = ctx.createRadialGradient(bx, by, 0, bx, by, 12);
+  g.addColorStop(0, `rgba(${col},${glow * dim})`); g.addColorStop(1, `rgba(${col},0)`);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(bx, by, 12, 0, TAU); ctx.fill();
+  ctx.fillStyle = `rgba(${col},${dim})`; ctx.beginPath(); ctx.arc(bx, by, 5, 0, TAU); ctx.fill();
+  // label centred at 12 o'clock just inside the ring (drawRingLabels moves the control family's
+  // name to 6 o'clock while a session is on the ring, so the two never run together)
+  ctx.font = "10px " + MONO; ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = w.gold ? "rgba(255,215,107,0.85)" : `rgba(220,228,245,${w.phase === "pending" ? 0.5 : 0.75})`;
+  if (!isZen()) {                                   // zen view: the ring and ball, no text
+    ctx.fillText(w.label, CX, CY - rw + 8);
+    if (isSim) { ctx.fillStyle = "rgba(220,228,245,0.45)"; ctx.fillText("SIMULATION", CX, CY - rw + 21); }
+  }
+  ctx.restore();
+}
+
+/* walk controls */
+function setWalkMsg(txt, bad) { const el = $("walkMsg"); el.textContent = txt || ""; el.className = bad ? "bad" : ""; }
+// LIVE: would the walk the controls describe overlap a registered window? (the ledger, not the ring)
+function walkLiveBusy(nowS) {
+  const minutes = +$("walkMin").value || 10;
+  const start = nowS + WALK_SETTLE, end = start + minutes * 60;
+  return regs.items.some(r => isNum(r.start) && isNum(r.end) && r.start < end && start < r.end && nowS < r.end);
+}
+function walkSyncControls() {
+  $("walkGroup").style.display = mode === "hist" ? "none" : "";
+  $("btnWalkStop").style.display = mode === "sim" ? "" : "none";
+  if (mode === "hist") return;
+  const nowS = walkNow(), w = walkState();
+  const busy = mode === "live" ? walkLiveBusy(nowS) : !!(w && (w.phase === "pending" || w.phase === "open"));
+  const btn = $("btnWalk");
+  btn.disabled = busy || walk.posting;
+  if (mode === "live" && walk.confirmUntil > performance.now() && !btn.disabled) {
+    btn.textContent = `Confirm ${$("walkDir").value} · ${$("walkMin").value} min (cannot be cancelled)`;
+    btn.classList.add("on");
+  } else {
+    walk.confirmUntil = 0; btn.textContent = "Start walk"; btn.classList.remove("on");
+  }
+  btn.title = mode === "live"
+    ? "Registers a walk window in the ledger (statistic Σz, 60 s settle). A registered window cannot be cancelled — ledger integrity. Click twice: the second click confirms."
+    : "Starts a simulated walk after a 60 s settle (simulation only; nothing is registered)";
+  $("btnWalkStop").disabled = !walk.sim;
+}
+function walkStartSim() {
+  if (mode !== "sim") return;
+  const minutes = +$("walkMin").value, key = $("walkDir").value;
+  const start = walkNow() + WALK_SETTLE;                       // opens exactly 60 s after the sim's current second
+  walk.sim = { start, end: start + minutes * 60, direction: WALK_DIRS[key].direction, statistic: "stouffer", label: `SIM walk · ${key} · ${minutes} min` };
+  setWalkMsg(""); walkSyncControls();
+}
+function walkStopSim() { walk.sim = null; setWalkMsg(""); walkSyncControls(); }
+async function walkStartLive() {
+  if (mode !== "live") return;                                 // never POST from a simulation
+  if (walk.confirmUntil <= performance.now()) {                // first click: ask for confirmation of a permanent write
+    walk.confirmUntil = performance.now() + WALK_CONFIRM_MS;
+    setWalkMsg("click again to register (permanent)"); walkSyncControls();
+    return;
+  }
+  walk.confirmUntil = 0;
+  const minutes = +$("walkMin").value, key = $("walkDir").value;
+  const body = { minutes, statistic: "stouffer", direction: WALK_DIRS[key].direction, label: `walk · ${key} · ${minutes} min`, lead_s: WALK_SETTLE };
+  walk.posting = true; walkSyncControls(); setWalkMsg("registering…");
+  const gen = modeGen;
+  try {
+    const r = await fetch(historyOrigin() + "/api/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" });
+    let j = null; try { j = await r.json(); } catch (e) {}
+    if (!r.ok) throw new Error((j && j.error) || ("HTTP " + r.status));
+    if (gen !== modeGen) return;
+    setWalkMsg(`registered${j && j.id ? " " + j.id : ""} · opens in ${fmtLeft(WALK_SETTLE)}`);
+    await pollRegs();                                             // the settle countdown appears
+  } catch (err) {
+    if (gen === modeGen) setWalkMsg(`register failed: ${err.message}`, true);
+  } finally {
+    walk.posting = false; walkSyncControls();
+  }
+}
+function walkStart() { if (mode === "sim") walkStartSim(); else if (mode === "live") walkStartLive(); }
+// ledger polling cadence: every 2 s while a session is open (the bridge's walk numbers drive the
+// ball), every 10 s while a closed session awaits its result, otherwise the 30 s timer
+function walkPollBoost() {
+  if (mode !== "live" || paused) return;
+  const w = walkState(); if (!w) return;
+  const since = performance.now() - (regs.lastPoll || 0);
+  if (w.phase === "open" && since > 2000) pollRegs();
+  else if (w.phase === "after" && !w.res && since > 10000) pollRegs();
 }
 
 /* ---------------- HISTORY ---------------- */
@@ -892,15 +1210,17 @@ requestAnimationFrame(frame);
 
 const MONO = getComputedStyle(document.body).getPropertyValue("--mono");
 function drawRingLabels() {
+  if (isZen()) return;
   ctx.font = "10px " + MONO;
   ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  const walkOn = !!walkState();          // the walk label owns 12 o'clock inside 0.72 R while a session is on the ring
   for (const f of fams) {
     const info = D && D.eggs[f.name];
     const stale = info && isStale(f.name, info);
-    const y = CY - f.rDisp - 5;
     const txt = f.name + (stale ? " · stale" : "");
     ctx.fillStyle = stale ? "rgba(240,88,106,0.85)" : "rgba(220,228,245,0.8)";
-    ctx.fillText(txt, CX, y);
+    if (walkOn && f.ctrl) { ctx.textBaseline = "top"; ctx.fillText(txt, CX, CY + f.rDisp + 5); ctx.textBaseline = "bottom"; continue; }
+    ctx.fillText(txt, CX, CY - f.rDisp - 5);
   }
 }
 
@@ -1051,6 +1371,7 @@ const spark = $("spark"), sctx = spark.getContext("2d");
 function updateHUD() {
   if (mode === "live" && regs.items.length) renderRegs();
   const [cls, lvl, why] = statusOf();
+  $("zenFault").classList.toggle("on", cls === "crit");
   const st = $("status"); st.className = cls;
   st.querySelector(".lvl").textContent = lvl; st.querySelector(".why").textContent = why;
   if (!D) return;
@@ -1138,6 +1459,33 @@ setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
     return out;
   };
 }
+// THE WALK: wrap the (already wrapped) ring drawer and status chip, the registrations
+// card, mode switching and the sim reset — extend, never rewrite
+{
+  const baseRing = drawOuterRing, baseStatus = statusOf, baseRegs = renderRegs, baseMode = setMode, baseReset = simReset;
+  drawOuterRing = function () { baseRing(); drawWalkRing(); };
+  statusOf = function () {                       // LIVE sessions already carry the REGISTERED prefix
+    const out = baseStatus();
+    if (mode === "sim") {
+      const w = walkState();
+      if (w && w.phase !== "after" && Array.isArray(out) && out.length >= 3)
+        out[2] = `SIM WALK · ${w.key} · ${w.phase === "pending" ? "opens in " + fmtLeft(w.s.start - w.nowS) : fmtLeft(w.s.end - w.nowS) + " left"} · ` + out[2];
+    }
+    return out;
+  };
+  renderRegs = function () {
+    baseRegs();
+    const el = $("regWalk"), w = mode === "live" ? walkState() : null;
+    if (w && w.phase === "open") {
+      el.style.display = "";
+      el.textContent = `walk ${w.key} · Σz ${fz(w.S, 1)} (Z so far ${fz(w.Zw)}, n ${w.n}/${w.len}) · ${w.laps.toFixed(2)} lap${w.key === "LO" ? " toward LO" : ""}` +
+                       ` · 5 % line at ${w.f95.toFixed(2)} lap · one lap = 1 % line (${w.key === "BL" ? "two-sided" : "one-sided"})`;
+    } else { el.style.display = "none"; el.textContent = ""; }
+  };
+  setMode = function (next) { baseMode(next); walk.confirmUntil = 0; setWalkMsg(""); walkSyncControls(); };
+  simReset = function () { baseReset(); walk.sim = null; };   // history is gone; a session over it would be a lie
+}
+setInterval(() => { walkSyncControls(); walkPollBoost(); }, 500);
 simReset(); simTick();
 
 // deep link for sharing/captures: ?sim=corr|mean|var|fault starts SIMULATION with
@@ -1177,12 +1525,33 @@ $("injVar").onclick = () => inject("var");
 $("injCorr").onclick = () => inject("corr");
 $("injFault").onclick = () => inject("fault");
 $("btnCalm").onclick = calm;
+$("btnWalk").onclick = walkStart;
+$("btnWalkStop").onclick = walkStopSim;
+walkSyncControls();
 $("btnPause").onclick = () => { paused = !paused; $("btnPause").textContent = paused ? "Resume" : "Pause"; };
 $("btnHelp").onclick = () => $("help").classList.add("open");
 $("hudToggle").onclick = () => $("hud").classList.toggle("hidden");
+// zen view: nothing but the field. Z toggles; ?zen=1 bookmarks it; remembered per browser.
+function setZen(on) {
+  document.body.classList.toggle("zen", on);
+  try { localStorage.setItem("zen", on ? "1" : "0"); } catch (e) {}
+  if (on) {
+    const h = $("zenHint"); h.classList.add("show");
+    clearTimeout(setZen._t); setZen._t = setTimeout(() => h.classList.remove("show"), 4000);
+  }
+}
+const isZen = () => document.body.classList.contains("zen");
+$("zenBtn").onclick = () => setZen(false);
+$("btnZen").onclick = () => setZen(true);
+(() => {
+  let z = new URLSearchParams(location.search).get("zen");
+  if (z == null) { try { z = localStorage.getItem("zen"); } catch (e) {} }
+  if (z === "1") setZen(true);
+})();
 document.addEventListener("keydown", e => {
   if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
   if (e.key === "h" || e.key === "H") $("hud").classList.toggle("hidden");
+  if (e.key === "z" || e.key === "Z") setZen(!isZen());
   if (e.key === "Escape") $("help").classList.remove("open");
   if (e.key === " " && mode === "hist") { e.preventDefault(); setPlaying(!hist.playing); }
 });

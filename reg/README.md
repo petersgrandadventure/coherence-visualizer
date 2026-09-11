@@ -95,6 +95,40 @@ injection) for comparison — note the control ghost trace in both:
 
 ![Simulated excursion, netvar z +8.8](../docs/field-excursion.png)
 
+## Pre-registration (running an experiment)
+
+Analysis of a week of data shows the network is indistinguishable from the
+control in frequency, duration, and magnitude of excursions — as it should be.
+The way to ask a real question of it is to **declare the window before it
+opens**, so no one (including you) gets to choose what counts after seeing the
+data:
+
+```bash
+./reg_register.py register --at 20:00 --minutes 20 --label "evening sit" --statistic netvar --direction up
+./reg_register.py register --in 5m --minutes 15 --label "group call" --statistic stouffer --direction two-sided
+./reg_register.py list
+./reg_register.py summary        # the formal series: combined Z over all pre-registered windows
+```
+
+A registration fixes start, duration, one primary statistic (`netvar` =
+network variance, `stouffer` = mean shift), the hypothesised direction and a
+label; it is hashed and appended to `data/registrations.db`, never edited. A
+window must start at least 60 s after registration — anything later is
+allowed with `--post-hoc` but permanently flagged and kept out of the formal
+series. About 30 s after a window closes the bridge evaluates it (or run
+`evaluate`): constants come only from data *before* the window, the declared
+statistic gets a tail probability from a bootstrap of the control egg's own
+history at that window length, and the result records per-egg values, the
+control egg's result in the same window, the cumulative-band check, excluded
+seconds and covariates. Every registration gets a result row, including
+"no data" — there is no file drawer. The formal series combines all
+pre-registered windows into one Stouffer Z, with the control's matched
+windows combined the same way as the null anchor.
+
+In the field, an open window shows as a gold arc on the outer ring with a
+countdown in the status chip, and the **Registered windows** card carries the
+running formal result.
+
 ## Honest expectations
 
 The GCP's published effect is ~0.3σ per pre-registered event pooled over ~60

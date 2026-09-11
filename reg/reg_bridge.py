@@ -14,6 +14,7 @@ Endpoints (CORS-enabled):
                               window statistics with empirical control tail probabilities
     /api/calibration          constants, band, null-distribution sizes, refresh times
     /api/history?hours=24     per-second z per egg + Stouffer Z for replay (≤ 72 h)
+    /api/registrations        pre-registered windows: pending / open / evaluated, and the formal series
 
 Calibration constants, the Monte-Carlo band and the control null distributions
 are all estimated from ONE history: control rows with ts < now − MAX_WINDOW at the
@@ -36,6 +37,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import reg_stats as rs  # noqa: E402
+import reg_registry as rr  # noqa: E402
 
 HTML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "field.html")
 REFRESH_S = 3600
@@ -53,6 +55,7 @@ class Model:
         self.refreshed, self.refresh_error, self.before_ts = 0.0, "", None
         self.refresh()
         threading.Thread(target=self._loop, daemon=True).start()
+        threading.Thread(target=self._registry_loop, daemon=True).start()
 
     def connect(self):
         conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=10)
@@ -83,6 +86,40 @@ class Model:
         while True:
             time.sleep(REFRESH_S)
             self.refresh()
+
+    def _registry_loop(self):
+        """Evaluate closed pre-registered windows ~30 s after they close."""
+        while True:
+            try:
+                reg = rr.open_registry(); conn = self.connect()
+                try:
+                    new = rr.evaluate_pending(conn, reg)
+                    for rid, res in new.items():
+                        print(f"registration {rid} evaluated: {res.get('status')} "
+                              f"{res.get('statistic', '')} {res.get('primary_value', '')} p {res.get('p_control', '')}", flush=True)
+                finally:
+                    conn.close(); reg.close()
+            except Exception as e:
+                print(f"registry evaluation error: {e!r}", flush=True)
+            time.sleep(60)
+
+    def registrations_state(self):
+        now = time.time(); reg = rr.open_registry()
+        try:
+            regs, res = rr.registrations(reg), rr.results(reg)
+            items = []
+            for r in regs:
+                st = rr.status_of(r, res, now)
+                item = {**r, "status": st}
+                if st == "evaluated":
+                    x = res[r["id"]]
+                    item["result"] = {k: x.get(k) for k in ("status", "primary_value", "p_control", "p_analytic",
+                                                          "stouffer_Z", "netvar_z", "n_seconds", "control_primary_value", "band")}
+                items.append(item)
+            summary = rr.formal_summary(reg)
+        finally:
+            reg.close()
+        return {"now": int(now), "registrations": items[-50:], "formal": {k: v for k, v in summary.items() if k != "windows"}}
 
     def state(self, window):
         window = max(60, min(int(window), MAX_WINDOW))
@@ -174,8 +211,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, MODEL.calibration_summary())
             elif u.path == "/api/history":
                 self._send(200, MODEL.history(q.get("hours", [24])[0]))
+            elif u.path == "/api/registrations":
+                self._send(200, MODEL.registrations_state())
             else:
-                self._send(404, {"error": "use /, /api/state, /api/calibration, /api/history"})
+                self._send(404, {"error": "use /, /api/state, /api/calibration, /api/history, /api/registrations"})
         except Exception as e:
             self._send(500, {"error": repr(e)})
 

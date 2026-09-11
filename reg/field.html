@@ -140,6 +140,12 @@
     </table>
     <div class="sub" id="headRatio">—</div>
   </div>
+  <div class="card" id="regCard" style="display:none">
+    <h2>Registered windows <span class="tag" id="regTag" style="color:var(--ink-3)"></span></h2>
+    <div class="sub" id="regOpen" style="white-space:normal">—</div>
+    <div class="sub" id="regFormal" style="white-space:normal">—</div>
+    <div class="sub" id="regLast" style="white-space:normal"></div>
+  </div>
   <div class="card" id="calCard">
     <h2>Calibration <span class="tag" id="calTag"></span></h2>
     <div id="calRows"></div>
@@ -576,6 +582,60 @@ function simTick() {                 // catch up to wall-clock seconds (throttle
 function inject(key) { if (mode !== "sim") return; sim.inj[key] = { t0: sim.n }; simTick(); }
 function calm() { sim.inj = {}; sim.faultEgg = null; simTick(); }
 
+/* ---------------- REGISTRATIONS (pre-registered windows, live mode) ---------------- */
+const regs = { items: [], formal: null, timer: null };
+async function pollRegs() {
+  if (mode !== "live") return;
+  try {
+    const r = await fetch(historyOrigin() + "/api/registrations", { cache: "no-store" });
+    if (r.ok) { const j = await r.json(); regs.items = j.registrations || []; regs.formal = j.formal || null; }
+  } catch (e) {}
+  renderRegs();
+}
+function regOpen(nowS) { return regs.items.find(r => nowS >= r.start && nowS < r.end) || null; }
+function fmtLeft(s) { s = Math.max(0, Math.round(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
+function renderRegs() {
+  const card = $("regCard"), nowS = Math.floor(Date.now() / 1000);
+  if (mode !== "live" || !regs.items.length) { card.style.display = "none"; return; }
+  card.style.display = "";
+  const o = regOpen(nowS);
+  const p = regs.items.filter(r => r.start > nowS).sort((a, b) => a.start - b.start)[0];
+  const f = regs.formal || {};
+  $("regTag").textContent = `${f.N || 0} formal` + (f.post_hoc_count ? ` · ${f.post_hoc_count} post hoc` : "");
+  $("regOpen").textContent = o
+    ? `OPEN · ${o.label} · ${o.statistic} / ${o.direction} · ${fmtLeft(o.end - nowS)} left`
+    : p ? `next: ${p.label} at ${new Date(p.start * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} (${Math.round((p.end - p.start) / 60)} min)`
+        : "no window pending";
+  $("regFormal").textContent = f.N
+    ? `formal series: combined Z ${fz(f.combined_Z)} · two-sided p ${fp(f.combined_p_two_sided)}` + (isNum(f.control_combined_Z) ? ` · control ${fz(f.control_combined_Z)}` : "")
+    : "formal series: no pre-registered results yet";
+  const ev = regs.items.filter(r => r.status === "evaluated" && r.result && r.result.status === "evaluated").slice(-1)[0];
+  $("regLast").textContent = ev
+    ? `last: ${ev.label} → ${ev.statistic} ${fz(ev.result.primary_value)} · p vs control ${fp(ev.result.p_control)}` + (ev.post_hoc ? " (post hoc)" : "")
+    : "";
+}
+// the open window's span on the outer ring, and evaluated windows within the display span
+function drawRegArcs() {
+  if (mode !== "live" || !D || !regs.items.length) return;
+  const s = D.series, win = D.window || displayWindow, t0 = D.now - s.len + 1;
+  const rc = R * RING_C, hw = R * RING_HW, band = D.band;
+  const c95 = band[`c95_${traceKind}`], c99 = band[`c99_${traceKind}`];
+  const k99 = isNum(c95) && isNum(c99) && c95 > 0 ? c99 / c95 : 1.2;
+  const theta = i => -Math.PI / 2 + TAU * (i / win);
+  const nowS = Math.floor(Date.now() / 1000);
+  for (const r of regs.items) {
+    const i0 = Math.max(0, r.start - t0), i1 = Math.min(s.len - 1, Math.min(r.end, nowS) - t0);
+    if (i1 <= i0) continue;
+    const open = nowS >= r.start && nowS < r.end;
+    ctx.beginPath(); ctx.arc(CX, CY, rc + hw * k99 + 6, theta(i0), theta(i1));
+    ctx.strokeStyle = open ? "rgba(255,215,107,0.75)" : "rgba(160,172,200,0.45)"; ctx.lineWidth = open ? 3 : 1.5; ctx.stroke();
+    if (open) {
+      ctx.fillStyle = "rgba(255,215,107,0.06)";
+      ctx.beginPath(); ctx.arc(CX, CY, rc + hw * k99, theta(i0), theta(i1)); ctx.arc(CX, CY, rc - hw * k99, theta(i1), theta(i0), true); ctx.fill();
+    }
+  }
+}
+
 /* ---------------- HISTORY ---------------- */
 const hist = { data: null, zs: {}, physical: [], excluded: [], len: 0, idx: 0, playing: false, speed: 60, timer: null, acc: 0, ticks: [], Z600: null, band: null, consts: null, calibrated: true };
 const SPEEDS = [1, 60, 600];
@@ -686,10 +746,13 @@ function setMode(next) {
   $("btnHist").classList.toggle("active", mode === "hist");
   for (const id of ["injMean", "injVar", "injCorr", "injFault", "btnCalm"]) $(id).disabled = mode !== "sim";
   clearInterval(live.timer); live.timer = null;
+  clearInterval(regs.timer); regs.timer = null;
   setPlaying(false);
   $("timeline").classList.toggle("open", mode === "hist");
-  if (mode === "live") { live.fails = 0; setLiveState("connecting…"); pollLive(); live.timer = setInterval(pollLive, 2000); }
+  if (mode === "live") { live.fails = 0; setLiveState("connecting…"); pollLive(); live.timer = setInterval(pollLive, 2000);
+                         pollRegs(); regs.timer = setInterval(pollRegs, 30000); }
   else if (mode === "sim") { setLiveState(""); if (!sim.zs[CONTROL]) simReset(); simTick(); }
+  renderRegs();
 }
 function setWindow(w) {
   displayWindow = w;
@@ -986,6 +1049,7 @@ function setBar(fill, v, isTenMin = false) {   // ±3 bar from the centre; gold 
 }
 const spark = $("spark"), sctx = spark.getContext("2d");
 function updateHUD() {
+  if (mode === "live" && regs.items.length) renderRegs();
   const [cls, lvl, why] = statusOf();
   const st = $("status"); st.className = cls;
   st.querySelector(".lvl").textContent = lvl; st.querySelector(".why").textContent = why;
@@ -1063,6 +1127,17 @@ setInterval(() => { if (!paused) updateHUD(); }, 250);
    SECTION 8 · CONTROLS, HELP, BOOT
    ============================================================================ */
 setInterval(() => { if (mode === "sim" && !paused) simTick(); }, 1000);
+// registered-window overlays: wrap the ring drawer and the status chip
+{
+  const baseRing = drawOuterRing, baseStatus = statusOf;
+  drawOuterRing = function () { baseRing(); drawRegArcs(); };
+  statusOf = function () {
+    const out = baseStatus();
+    const o = mode === "live" ? regOpen(Math.floor(Date.now() / 1000)) : null;
+    if (o && Array.isArray(out) && out.length >= 3) out[2] = `REGISTERED · ${o.label} · ${fmtLeft(o.end - Date.now() / 1000)} left · ` + out[2];
+    return out;
+  };
+}
 simReset(); simTick();
 
 // deep link for sharing/captures: ?sim=corr|mean|var|fault starts SIMULATION with
